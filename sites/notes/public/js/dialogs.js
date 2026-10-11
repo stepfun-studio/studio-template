@@ -1,0 +1,168 @@
+// @ts-check
+/* Chronicle dialog helpers: pure builders for dialog content that app.js
+   renders. No state and no network — everything works on the values and the
+   document passed in through the DOM globals. */
+'use strict';
+{
+  /** @typedef {{ newCount: number, conflicts: number, invalid: number, invalidFolders: number, invalidRevisions: number, revisions: unknown[], folders: unknown[] }} ImportPreview */
+
+  /**
+   * @param {string} tag
+   * @param {string} text
+   */
+  function textEl(tag, text) {
+    const node = document.createElement(tag);
+    node.textContent = text;
+    return node;
+  }
+
+  /**
+   * One stat card per count, in the order the import tests pin: new,
+   * conflicts, rejected entries, revision snapshots, rejected revisions,
+   * folders. Each card is a div wrapping the dt/dd pair.
+   * @param {ImportPreview} preview
+   */
+  function importPreviewRows(preview) {
+    const rows = [
+      ['New notes', preview.newCount],
+      ['Conflicts', preview.conflicts],
+      ['Rejected entries', preview.invalid + preview.invalidFolders],
+      ['Revision snapshots', preview.revisions.length],
+      ['Rejected revisions', preview.invalidRevisions],
+      ['Folders', preview.folders.length],
+    ];
+    return rows.map(([label, value]) => {
+      const card = document.createElement('div');
+      card.append(textEl('dt', String(label)), textEl('dd', String(value)));
+      return card;
+    });
+  }
+
+  /**
+   * @param {string[]} rejected
+   */
+  function importRejectedContent(rejected) {
+    const shown = rejected.slice(0, 5);
+    const items = shown.map((message) => textEl('li', message));
+    if (rejected.length > shown.length) {
+      const extra = rejected.length - shown.length;
+      items.push(textEl('li', `${extra} more rejected entr${extra === 1 ? 'y' : 'ies'}.`));
+    }
+    const list = document.createElement('ul');
+    list.append(...items);
+    return [textEl('p', 'Skipped invalid import content'), list];
+  }
+
+  /**
+   * The primary button states the outcome for the selected conflict mode.
+   * Folders and revisions ride along silently, so an import that writes no
+   * notes keeps the generic label.
+   * @param {ImportPreview | null | undefined} preview
+   * @param {string} mode
+   */
+  function importOutcomeLabel(preview, mode) {
+    if (!preview) return 'Import';
+    const count = mode === 'skip' ? preview.newCount : preview.newCount + preview.conflicts;
+    if (count < 1) return 'Import';
+    return count === 1 ? 'Import 1 note' : `Import ${count} notes`;
+  }
+
+  /** HH:MM for the line quick capture appends. */
+  function captureTimestamp() {
+    const d = new Date();
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+
+  /**
+   * @param {string} body
+   * @param {string} line
+   */
+  function appendCaptureLine(body, line) {
+    const trimmed = (body || '').replace(/\s+$/, '');
+    return (trimmed ? trimmed + '\n' : '') + line + '\n';
+  }
+
+  /**
+   * The spotlight foot mirrors the capture line: bold timestamp, then the
+   * typed text — or a muted placeholder while the input is empty.
+   * @param {string} stamp
+   * @param {string} text
+   */
+  function capturePreview(stamp, text) {
+    const stampEl = textEl('strong', stamp);
+    stampEl.className = 'quick-capture-stamp';
+    const body = textEl('span', text || 'your note…');
+    body.className = text ? 'quick-capture-text' : 'quick-capture-text is-empty';
+    return [stampEl, body];
+  }
+
+  /**
+   * Maps a diagnostics value to its status-dot state. Attention states and
+   * unknowable states are named; anything else (a timestamp, "Ready",
+   * "Persistent") reads as healthy.
+   * @param {string | null} value
+   */
+  function statusState(value) {
+    const text = (value || '').trim();
+    if (['Best effort', 'No backup recorded', 'Available after reload'].includes(text)) return 'warn';
+    if (!text || text === 'Unavailable' || text === 'Checking...') return 'muted';
+    return 'ok';
+  }
+
+  /**
+   * Opens a native dialog and resolves true when the confirm button fires,
+   * false when the dialog is dismissed (Cancel, the close button, Escape).
+   * The hold-to-confirm module raises the confirm click after its hold, so
+   * a held button resolves the same way as a plain one.
+   * @param {HTMLDialogElement} dialog
+   * @param {HTMLElement} confirmButton
+   * @param {(dialog: HTMLDialogElement) => void} open
+   * @param {(dialog: HTMLDialogElement) => void} close
+   * @returns {Promise<boolean>}
+   */
+  function confirmDialog(dialog, confirmButton, open, close) {
+    return new Promise((resolve) => {
+      open(dialog);
+      let settled = false;
+      const dismissButtons = Array.from(dialog.querySelectorAll('[data-dialog-close]'));
+      const cleanup = () => {
+        confirmButton.removeEventListener('click', onConfirm);
+        dialog.removeEventListener('cancel', onDismiss);
+        dialog.removeEventListener('close', onClose);
+        for (const button of dismissButtons) button.removeEventListener('click', onDismiss);
+      };
+      /** @param {boolean} confirmed @param {boolean} shouldClose */
+      const finish = (confirmed, shouldClose) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (shouldClose) close(dialog);
+        resolve(confirmed);
+      };
+      const onConfirm = () => finish(true, true);
+      const onDismiss = () => finish(false, false);
+      const onClose = () => {
+        // A native close event is queued. If the dialog has already reopened,
+        // this event belongs to the previous confirmation and must be ignored.
+        if (!dialog.open) finish(false, false);
+      };
+      confirmButton.addEventListener('click', onConfirm);
+      dialog.addEventListener('cancel', onDismiss);
+      dialog.addEventListener('close', onClose);
+      for (const button of dismissButtons) button.addEventListener('click', onDismiss);
+    });
+  }
+
+  /** @type {Window & typeof globalThis & { ScratchpadDialogs?: object }} */
+  const root = window;
+  root.ScratchpadDialogs = Object.freeze({
+    importPreviewRows,
+    importRejectedContent,
+    importOutcomeLabel,
+    statusState,
+    captureTimestamp,
+    appendCaptureLine,
+    capturePreview,
+    confirmDialog,
+  });
+}

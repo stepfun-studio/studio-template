@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="description" content="Scratchpad terms of use — local-first notes app, provided as-is, your data stays in your browser." />
+  <meta name="referrer" content="no-referrer" />
+  <title>Terms of Use — Scratchpad</title>
+
+  <meta property="og:type" content="article" />
+  <meta property="og:site_name" content="Scratchpad" />
+  <meta property="og:title" content="Terms of Use — Scratchpad" />
+  <meta property="og:description" content="Plain-language terms for a free, local-first notes app." />
+  <meta property="og:url" content="https://notes.vinny.dev/terms.html" />
+  <meta property="og:image" content="https://notes.vinny.dev/public/og-banner.png" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Scratchpad: private notes that stay in your browser." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Terms of Use — Scratchpad" />
+  <meta name="twitter:description" content="Plain-language terms for a free, local-first notes app." />
+  <meta name="twitter:image" content="https://notes.vinny.dev/public/og-banner.png" />
+
+  <script>
+    (function () {
+      var s = localStorage.getItem('theme-preview') || 'auto';
+      if (s === 'light' || s === 'dark')
+        document.documentElement.setAttribute('data-theme', s);
+    })();
+  </script>
+
+  <link rel="icon" type="image/svg+xml" href="public/favicon.svg" />
+  <link rel="icon" type="image/png" sizes="64x64" href="public/favicon-64.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="public/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="public/favicon-16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="public/favicon-180.png" />
+  <link rel="stylesheet" href="public/css/inkwell.css" />
+  <link rel="stylesheet" href="public/css/app.css" />
+</head>
+<body class="page-privacy">
+  <header class="site-nav-wrap">
+    <nav class="site-nav" aria-label="Site">
+      <a class="site-nav-brand" href="index.html" aria-label="Scratchpad home">
+        <span class="site-nav-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M6 8h12M6 13h8M6 18h10"/></svg>
+        </span>
+        <span class="site-nav-wordmark">Scratchpad</span>
+      </a>
+      <div class="site-nav-links">
+        <a href="guide.html">Guide</a>
+        <a href="about.html">About</a>
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html" aria-current="page">Terms</a>
+      </div>
+      <button id="theme-toggle" class="site-nav-theme" type="button" aria-label="Toggle theme">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.25" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 3.75a8.25 8.25 0 0 1 0 16.5Z" fill="currentColor"/></svg>
+        <span id="theme-label" class="visually-hidden">auto</span>
+      </button>
+      <a class="btn btn-primary site-nav-cta" href="index.html">Open app</a>
+    </nav>
+  </header>
+
+  <main class="privacy-main">
+    <article class="card privacy-card">
+      <p class="eyebrow">Terms of use</p>
+      <h1 class="privacy-title">Plain-language terms for a local-first app.</h1>
+      <p class="privacy-lede">
+        Scratchpad is a free, local-first notes app. There is no account and no relationship to
+        manage. These terms exist mainly to set expectations and to make clear what the app does
+        and does not promise.
+      </p>
+
+      <h2>Using Scratchpad</h2>
+      <p>
+        By loading Scratchpad in your browser, you agree to these terms. If you don't agree, the
+        remedy is simple: close the tab. No account exists to deactivate, and no data is held
+        anywhere outside your browser.
+      </p>
+
+      <h2>What Scratchpad is</h2>
+      <ul>
+        <li>A static web page that runs in your browser.</li>
+        <li>Notes are stored in your browser's IndexedDB. Nothing is uploaded unless you explicitly create or update a share link.</li>
+        <li>There is no account system, no telemetry, and no advertising.</li>
+        <li>Server-side sharing stores encrypted copies. Links expire within 30 days of creation, followed by asynchronous ciphertext cleanup.</li>
+        <li>The full <a href="privacy.html">privacy policy</a> describes the data posture in detail.</li>
+      </ul>
+
+      <h2>Your data is your responsibility</h2>
+      <p>
+        Because everything lives in this browser, the only copy of your notes is the one on this
+        device. Use <strong>About → Export all notes (JSON)</strong> to back them up. Clearing site
+        data, switching browsers, switching devices, or using private browsing will erase the
+        notes that haven't been exported.
+      </p>
+      <p>
+        Scratchpad cannot recover notes that have been deleted from your browser. There is no
+        server-side copy to restore from.
+      </p>
+
+      <h2>Acceptable use</h2>
+      <p>
+        Scratchpad runs locally — what you write in it is between you and your own device.
+        You're still responsible for complying with the laws that apply to you when you write,
+        store, or share content with anyone else. Don't use the app to do anything illegal where
+        you live or where the recipients of any shared content live.
+      </p>
+
+      <h2>Sharing notes</h2>
+      <p>
+        Scratchpad provides options to copy a note to your clipboard or open it in your email
+        client. These actions happen on your device. What your clipboard manager or your email
+        client does with the content afterwards is governed by their own terms, not these.
+      </p>
+      <p>
+        Scratchpad also lets you create a <strong>public share link</strong> for a single note.
+        This uploads an encrypted copy of that note to our storage. The decryption key stays in
+        the link and is never sent to us, so we cannot read what you share. The link stops working
+        at the expiry you choose when creating it — 7, 14, 21, or 30 days — and ciphertext is
+        automatically cleaned up afterwards. You can stop sharing sooner. Explicitly updating a
+        shared link replaces its published content for everyone holding that URL, without changing
+        its expiry. Copies recipients have already saved are independent.
+      </p>
+      <p>
+        A share link is public. Anyone who has it can read the note and pass it on. There is no
+        password and no access list. You are responsible for who you give a link to, and for the
+        content you publish through one.
+      </p>
+
+      <h2>Publishing through a share link</h2>
+      <p>
+        When you create a share link you are publishing content on a domain we operate, so a few
+        additional terms apply to that content specifically.
+      </p>
+      <ul>
+        <li>
+          Don't publish content that is illegal where you live, unlawful to distribute, infringes
+          someone else's rights, or is intended to harass, defraud, or endanger anyone.
+        </li>
+        <li>
+          Don't use share links to distribute malware, phishing pages, or bulk unsolicited
+          content.
+        </li>
+        <li>
+          We may remove any shared copy at any time, with or without notice — for example in
+          response to a credible report of abuse or a legal request. Removal deletes the
+          ciphertext we hold; because we cannot decrypt it, we cannot review what we remove
+          beyond the fact that a specific link was reported.
+        </li>
+        <li>
+          Removing a shared copy does not touch your note. The original stays in your browser.
+        </li>
+      </ul>
+      <p>
+        To report a shared note, use the contact address below and include the full link.
+      </p>
+
+      <h2>Intellectual property</h2>
+      <p>
+        Anything you write in Scratchpad belongs to you. The app does not claim any rights to
+        your notes. It cannot read the notes you keep locally, and it cannot read the ones you
+        share either — those arrive encrypted, without the key.
+      </p>
+      <p>
+        The Scratchpad source code is published by
+        <a href="https://vinny.dev" target="_blank" rel="noopener noreferrer">Vinny Carpenter</a>.
+        Trademarks and brand elements (the Scratchpad name, the brand mark, the Inkwell design
+        system) remain the property of their respective owners.
+      </p>
+
+      <h2>No warranty</h2>
+      <p>
+        Scratchpad is provided <strong>as is</strong>, without warranties of any kind, express or
+        implied. That includes warranties of merchantability, fitness for a particular purpose,
+        and non-infringement. The app may contain bugs, may behave unexpectedly in your browser,
+        and may at some point go away. Treat it accordingly when deciding what to store in it.
+      </p>
+
+      <h2>Limitation of liability</h2>
+      <p>
+        To the fullest extent permitted by law, the author of Scratchpad will not be liable for
+        any direct, indirect, incidental, special, consequential, or exemplary damages arising
+        from your use of the app — including, without limitation, lost notes, lost data, or
+        any other intangible losses. Because the app is free and stores nothing on a server, the
+        practical liability ceiling is the cost of switching to a different notes app, which is
+        zero.
+      </p>
+
+      <h2>Service availability</h2>
+      <p>
+        Scratchpad is delivered as static files from a content delivery network. Best effort is
+        made to keep it online, but no uptime is guaranteed. The app may be updated, paused, or
+        retired at any time, with or without notice. Notes already in your browser will continue
+        to work even if the hosted version is unavailable, as long as the browser still has the
+        cached HTML and JavaScript.
+      </p>
+
+      <h2>Changes to these terms</h2>
+      <p>
+        These terms may be updated from time to time. The current version is whatever is shown on
+        this page. Material changes will be reflected in plain language; there is no mailing list
+        to notify because there is no list of users.
+      </p>
+
+      <h2>Contact</h2>
+      <p>
+        Scratchpad is built by
+        <a href="https://vinny.dev" target="_blank" rel="noopener noreferrer">Vinny Carpenter</a>.
+        Questions about these terms can be directed there. The source code is the authoritative
+        record of what the app actually does.
+      </p>
+    </article>
+  </main>
+
+  <footer class="app-footer">
+    <div class="footer-inner">
+      <a href="index.html" class="footer-brand" aria-label="Scratchpad home">
+        <span class="footer-wordmark">Scratchpad</span>
+        <span class="footer-tagline">Notes that stay in your browser.</span>
+      </a>
+      <nav class="footer-nav" aria-label="Site links">
+        <a href="about.html">About</a>
+        <a href="guide.html">Guide</a>
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+        <a class="footer-ext-link" href="https://vinny.dev" target="_blank" rel="noopener noreferrer">
+          vinny.dev
+          <svg class="footer-ext-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path d="M9 3h4v4M13 3 8 8M11 9v3.5a.5.5 0 0 1-.5.5h-7a.5.5 0 0 1-.5-.5v-7a.5.5 0 0 1 .5-.5H7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </a>
+      </nav>
+    </div>
+    <div class="footer-meta-row">
+      <div class="footer-meta">
+        <span>v<span id="app-version">—</span></span>
+        <span class="footer-sep" aria-hidden="true">·</span>
+        <span>built <span id="app-build-date">—</span></span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="public/js/version.js"></script>
+  <script>
+    (function () {
+      const root = document.documentElement;
+      const btn = document.getElementById('theme-toggle');
+      const label = document.getElementById('theme-label');
+      const KEY = 'theme-preview';
+      const order = ['auto', 'light', 'dark'];
+      function apply(s) {
+        if (s === 'auto') root.removeAttribute('data-theme');
+        else root.setAttribute('data-theme', s);
+        if (label) label.textContent = s;
+      }
+      let current = localStorage.getItem(KEY) || 'auto';
+      if (!order.includes(current)) current = 'auto';
+      apply(current);
+      btn.addEventListener('click', () => {
+        current = order[(order.indexOf(current) + 1) % order.length];
+        localStorage.setItem(KEY, current);
+        apply(current);
+      });
+    })();
+  </script>
+</body>
+</html>

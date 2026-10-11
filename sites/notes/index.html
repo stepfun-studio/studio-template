@@ -1,0 +1,1236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="description" content="Scratchpad — a private, local-first notes app. Your notes stay in this browser unless you share one." />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="theme-color" content="#5661B3" />
+  <title>Scratchpad</title>
+
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Scratchpad" />
+  <meta property="og:title" content="Scratchpad — private, local-first notes" />
+  <meta property="og:description" content="A notes app that keeps everything in your browser, with encrypted opt-in sharing." />
+  <meta property="og:url" content="https://notes.vinny.dev/" />
+  <meta property="og:image" content="https://notes.vinny.dev/public/og-banner.png" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Scratchpad: private notes that stay in your browser." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Scratchpad — private, local-first notes" />
+  <meta name="twitter:description" content="A notes app that keeps everything in your browser, with encrypted opt-in sharing." />
+  <meta name="twitter:image" content="https://notes.vinny.dev/public/og-banner.png" />
+  <meta name="twitter:image:alt" content="Scratchpad: private notes that stay in your browser." />
+  <link rel="icon" type="image/svg+xml" href="/public/favicon.svg" />
+  <link rel="icon" type="image/png" sizes="64x64" href="/public/favicon-64.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/public/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/public/favicon-16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/public/favicon-180.png" />
+  <link rel="manifest" href="/public/manifest.webmanifest" />
+
+  <script>
+    (function () {
+      var s = localStorage.getItem('theme-preview') || 'auto';
+      if (s === 'light' || s === 'dark')
+        document.documentElement.setAttribute('data-theme', s);
+    })();
+  </script>
+
+  <link rel="stylesheet" href="/public/css/inkwell.css" />
+  <link rel="stylesheet" href="/public/css/app.css" />
+</head>
+<body>
+  <div class="app-shell" id="app-shell">
+    <nav class="chronicle-rail" id="chronicle-rail" aria-label="Daily notes by date">
+      <div class="chronicle-brand" aria-label="Scratchpad">
+        <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <rect class="brand-mark-bg" x="0" y="0" width="24" height="24" rx="5" />
+          <path class="brand-mark-lines" d="M7 8h10M7 13h7M7 18h9" />
+        </svg>
+        <span class="visually-hidden">Scratchpad</span>
+      </div>
+      <p class="chronicle-month" id="chronicle-month"></p>
+      <div class="chronicle-days" id="chronicle-days"></div>
+    </nav>
+    <aside class="sidebar" id="sidebar" aria-label="Notes">
+      <div class="sidebar-head">
+        <div class="sidebar-brand">
+          <div class="brand">
+            <h1 class="brand-title">
+              <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <rect class="brand-mark-bg" x="0" y="0" width="24" height="24" rx="5" />
+                <path class="brand-mark-lines" d="M7 8h10M7 13h7M7 18h9" />
+              </svg>
+              <span class="brand-name">Scratchpad</span>
+            </h1>
+            <div class="chronicle-sidebar-heading">
+              <div class="overflow-wrap view-menu-wrap">
+                <button id="view-menu-btn" class="view-menu-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="view-menu">
+                  <span class="visually-hidden">View:</span>
+                  <span id="view-menu-label">Notes</span>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+                </button>
+                <div id="view-menu" class="popover-menu view-menu" role="menu" aria-label="Note views" hidden>
+                  <button id="active-notes-view" class="is-active" role="menuitemradio" aria-checked="true" type="button">Notes</button>
+                  <button id="archive-view" role="menuitemradio" aria-checked="false" type="button">Archive</button>
+                  <button id="trash-view" role="menuitemradio" aria-checked="false" type="button">Trash</button>
+                </div>
+              </div>
+              <p class="sidebar-kicker">
+                <span id="note-count">0</span> <span id="note-count-noun">notes</span> ·
+                <span class="accent">all stored locally</span>
+              </p>
+            </div>
+            <div class="brand-actions">
+              <button id="open-settings" class="btn btn-ghost" type="button" aria-label="Settings" title="Settings">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+              </button>
+              <button id="open-about" class="btn btn-ghost" type="button" aria-label="About Scratchpad" title="About Scratchpad">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01"/><path d="M11 12h1v4h1"/></svg>
+              </button>
+              <button id="new-note" class="btn btn-primary compose-btn" type="button" aria-label="New note" title="New note (⌘N)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="sidebar-search">
+          <div class="search-control">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+            <input
+              id="search"
+              class="input search-input"
+              type="search"
+              placeholder="Search, or &gt; for commands"
+              autocomplete="off"
+              spellcheck="false"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded="false"
+              aria-label="Search notes or run a command"
+              aria-controls="note-list command-bar-list"
+              aria-describedby="search-status"
+            />
+            <span class="search-hint" aria-hidden="true">⌘K</span>
+            <div id="command-bar" class="command-bar" hidden>
+              <p id="command-bar-heading" class="command-bar-heading">Suggested</p>
+              <div id="command-bar-list" class="command-bar-list" role="listbox" aria-labelledby="command-bar-heading"></div>
+              <button id="command-palette-btn" class="command-bar-all" type="button">
+                All commands and notes
+                <kbd class="command-bar-kbd">⌘⇧P</kbd>
+              </button>
+            </div>
+          </div>
+          <p id="search-status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
+          <div id="active-filter" class="active-filter" hidden>
+            <span class="badge badge-accent">
+              tag: <span id="active-filter-tag"></span>
+              <button id="clear-filter" class="filter-x" type="button" aria-label="Clear tag filter">×</button>
+            </span>
+          </div>
+        </div>
+
+        <button id="today-note" class="chronicle-daily-card" type="button" aria-label="Open today's daily note">
+          <span class="chronicle-daily-title">Today’s note</span>
+          <svg class="chronicle-daily-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+      </div>
+
+      <nav class="note-list" id="note-list" aria-label="Note list">
+        <div class="list-header" id="list-header">
+          <div id="folder-navigation" class="folder-navigation" role="group" aria-label="Note location">
+            <button id="home-view" class="folder-navigation-home is-active" type="button" aria-pressed="true">Home</button>
+            <div class="folder-switcher-wrap">
+              <button id="folder-switcher-btn" class="folder-switcher-btn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="folder-switcher">
+                <span id="folder-switcher-label">Folders</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="overflow-wrap list-header-overflow">
+            <button id="list-menu-btn" class="icon-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="List options" title="List options">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/></svg>
+            </button>
+            <div id="list-menu" class="popover-menu" role="menu" hidden>
+              <button id="manage-tags" role="menuitem" type="button">Manage tags…</button>
+              <button id="new-folder-menu-btn" role="menuitem" type="button">New folder…</button>
+              <button id="bulk-toggle" role="menuitemcheckbox" aria-checked="false" type="button">Select notes</button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="overflow-wrap backup-wrap">
+          <button id="backup-chip" class="status-chip" type="button" aria-haspopup="menu" aria-expanded="false" data-backup-state="missing">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="backup-chip-label">Never backed up. Export now.</span>
+            <span class="backup-caret" aria-hidden="true"></span>
+          </button>
+          <div id="backup-menu" class="popover-menu popover-menu-up" role="menu" hidden>
+            <button id="export-btn" role="menuitem" type="button">Export backup (JSON)</button>
+            <button id="export-encrypted-btn" role="menuitem" type="button">Export encrypted backup…</button>
+            <button id="export-markdown-btn" role="menuitem" type="button">Export Markdown ZIP</button>
+            <hr class="menu-divider"/>
+            <button id="import-btn" role="menuitem" type="button">Import notes…</button>
+            <p id="backup-menu-meta" class="backup-menu-meta"></p>
+          </div>
+          <input id="import-file" type="file" accept="application/json,.json,text/markdown,.md,.markdown,.scratchpad" multiple hidden />
+          <input id="attach-image-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
+        </div>
+      </div>
+    </aside>
+
+    <main class="main" id="main">
+      <section id="editor-view" class="editor-view" hidden aria-labelledby="note-title-display">
+        <header class="editor-head">
+          <button id="back-to-list" class="btn btn-ghost btn-sm back-btn" type="button" aria-label="Back to list">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+            <span>Back</span>
+          </button>
+
+          <nav id="note-breadcrumb" class="note-breadcrumb" aria-label="Note location">notes</nav>
+
+          <div class="editor-actions">
+            <span id="dirty-indicator" class="dirty-indicator" hidden title="You have unsaved changes">
+              <span class="dot" aria-hidden="true"></span>Unsaved
+            </span>
+            <button id="outline-btn" class="icon-btn" type="button" aria-label="Outline" aria-expanded="false" aria-controls="note-outline" title="Outline" hidden>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16"/><path d="M8 12h12"/><path d="M8 18h8"/></svg>
+            </button>
+            <button id="focus-mode-btn" class="icon-btn" type="button" aria-pressed="false" aria-label="Focus mode" title="Focus mode (⌘/Ctrl+Shift+F)">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V5h4"/><path d="M20 9V5h-4"/><path d="M4 15v4h4"/><path d="M20 15v4h-4"/></svg>
+            </button>
+            <button id="edit-btn" class="btn btn-primary btn-sm" type="button">Edit</button>
+            <button id="save-btn" class="btn btn-primary btn-sm" type="button" hidden>Save</button>
+            <div class="overflow-wrap">
+              <button id="overflow-btn" class="icon-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More actions" title="More actions">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/></svg>
+              </button>
+              <div id="overflow-menu" class="popover-menu" role="menu" hidden>
+                <button id="pin-toggle" role="menuitemcheckbox" aria-checked="false" type="button" aria-label="Pin note" title="Pin note">Pin note</button>
+                <button id="share-btn" role="menuitem" type="button" aria-label="Share note" title="Share note">Share…</button>
+                <button id="move-note-overflow" role="menuitem" type="button" data-action="move">Move to folder…</button>
+                <button id="duplicate-overflow-btn" role="menuitem" type="button" data-action="duplicate">Duplicate</button>
+                <button id="attach-image-btn" role="menuitem" type="button" hidden>Attach image…</button>
+                <button id="history-btn" role="menuitem" type="button" data-action="history">History</button>
+                <button id="export-overflow-btn" role="menuitem" type="button" data-action="export">Download as Markdown</button>
+                <button id="print-overflow-btn" role="menuitem" type="button" data-action="print">Print or save as PDF…</button>
+                <hr class="menu-divider"/>
+                <button id="archive-note-btn" role="menuitem" type="button">Archive note</button>
+                <button id="unarchive-note-btn" role="menuitem" type="button" hidden>Unarchive note</button>
+                <button id="restore-btn" role="menuitem" type="button" hidden>Restore</button>
+                <button id="discard-overflow-btn" role="menuitem" type="button" data-action="discard" hidden>Discard changes</button>
+                <button id="delete-btn" role="menuitem" type="button" data-action="delete" class="is-destructive">Delete</button>
+                <button id="permanent-delete-btn" role="menuitem" type="button" class="is-destructive" hidden>Delete forever</button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <article class="card editor-card">
+          <div class="editor-date-spine" id="editor-date-spine" aria-hidden="true">
+            <strong id="editor-date-number"></strong>
+            <span id="editor-date-day"></span>
+          </div>
+          <div class="editor-doc-head" id="editor-doc-head">
+            <p class="eyebrow" id="note-eyebrow">Note · draft</p>
+            <h2 id="note-title-display" class="note-doc-title" tabindex="-1">Untitled note</h2>
+            <input
+              id="note-title-input"
+              class="note-doc-title note-doc-title-input"
+              type="text"
+              placeholder="Untitled note"
+              aria-label="Note title"
+              hidden
+            />
+            <p class="byline" id="note-byline" aria-live="polite"></p>
+          </div>
+
+          <div id="find-bar" class="find-bar" role="toolbar" aria-label="Find in note" hidden>
+            <div class="find-row">
+              <input
+                id="find-input"
+                class="input find-input"
+                type="text"
+                placeholder="Find in note…"
+                autocomplete="off"
+                spellcheck="false"
+                aria-label="Find in note"
+              />
+              <span id="find-count" class="find-count" hidden></span>
+              <button id="find-case-toggle" class="find-chip" type="button" aria-pressed="false" aria-label="Match case" title="Match case">Aa</button>
+              <button id="find-regex-toggle" class="find-chip" type="button" aria-pressed="false" aria-label="Regular expression" title="Regular expression">.*</button>
+              <button id="find-close" class="icon-btn find-close" type="button" aria-label="Close find bar" title="Close find bar">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+              </button>
+            </div>
+            <div class="find-row find-row-replace">
+              <input
+                id="find-replace-input"
+                class="input find-input"
+                type="text"
+                placeholder="Replace with…"
+                autocomplete="off"
+                spellcheck="false"
+                aria-label="Replace with"
+              />
+              <button id="find-replace-btn" class="btn btn-ghost btn-sm" type="button" disabled>Replace</button>
+              <button id="find-replace-all-btn" class="btn btn-ghost btn-sm" type="button" disabled>Replace all</button>
+            </div>
+            <p id="find-notice" class="find-notice" hidden>Invalid pattern</p>
+            <span id="find-live" class="visually-hidden" aria-live="polite"></span>
+          </div>
+
+          <div class="tag-bar" id="tag-bar">
+            <ul class="tag-pills" id="tag-pills" aria-label="Tags"></ul>
+            <button id="tag-add-empty" class="tag-add-empty" type="button" hidden>+ Add tag</button>
+            <button id="tag-add-plus" class="tag-add-plus" type="button" aria-label="Add tag" hidden>+</button>
+            <input
+              id="tag-input"
+              class="input tag-input"
+              type="text"
+              placeholder="tag…"
+              autocomplete="off"
+              spellcheck="false"
+              aria-label="Add tag"
+              hidden
+            />
+          </div>
+
+          <div id="editor-empty-state" class="editor-empty" hidden>
+            <p class="eyebrow">New note · just for you</p>
+            <p class="editor-empty-quote">A page is a small private room. What needs writing down?</p>
+            <p class="editor-empty-meta">
+              <span>Markdown supported</span>
+              <span class="dotsep" aria-hidden="true">·</span>
+              <span class="author">stays in this browser</span>
+            </p>
+            <div class="editor-hints">
+              <span class="hint"><kbd class="kbd">⌘</kbd><kbd class="kbd">S</kbd> save</span>
+              <span class="hint"><kbd class="kbd">#</kbd> heading</span>
+              <span class="hint"><kbd class="kbd">&gt;</kbd> quote</span>
+              <span class="hint"><kbd class="kbd">`</kbd> code</span>
+            </div>
+          </div>
+
+          <div id="note-rendered" class="note-rendered" hidden></div>
+          <details id="backlinks-section" class="backlinks" hidden>
+            <summary id="backlinks-summary" class="backlinks-summary">Linked from 0 notes</summary>
+            <ul id="backlinks-list" class="backlinks-list"></ul>
+          </details>
+          <details id="mentions-section" class="backlinks" hidden>
+            <summary id="mentions-summary" class="backlinks-summary">Mentioned in 0 notes</summary>
+            <ul id="mentions-list" class="backlinks-list mentions-list"></ul>
+          </details>
+          <div id="editor-format" class="editor-format" role="toolbar" aria-label="Markdown formatting" hidden>
+            <button id="format-bold" class="fmt-chip" type="button" data-format="bold" aria-label="Bold" title="Bold">B</button>
+            <button id="format-italic" class="fmt-chip fmt-italic" type="button" data-format="italic" aria-label="Italic" title="Italic">I</button>
+            <button id="format-highlight" class="fmt-chip fmt-mark" type="button" data-format="highlight" aria-label="Highlight" title="Highlight"><span aria-hidden="true">ab</span></button>
+            <button id="format-code" class="fmt-chip fmt-code" type="button" data-format="code" aria-label="Code" title="Code">&lt;/&gt;</button>
+            <button id="format-link" class="fmt-chip fmt-link" type="button" data-format="link" aria-label="Link" title="Link"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+            <span class="fmt-sep" aria-hidden="true"></span>
+            <button id="format-h2" class="fmt-chip fmt-text" type="button" data-format="h2" aria-label="Heading level 2" title="Heading">H2</button>
+            <button id="format-list" class="fmt-chip fmt-text" type="button" data-format="list" aria-label="Bulleted list" title="List">List</button>
+            <button id="format-quote" class="fmt-chip fmt-text" type="button" data-format="quote" aria-label="Block quote" title="Quote">Quote</button>
+          </div>
+          <textarea
+            id="note-editor"
+            class="textarea note-editor"
+            placeholder="Start writing in markdown…"
+            spellcheck="true"
+            hidden
+          ></textarea>
+          <div id="wikilink-suggest" class="wikilink-suggest" role="listbox" aria-label="Link suggestions" hidden></div>
+        </article>
+        <nav id="note-outline" class="note-outline" aria-label="Headings" hidden>
+          <ol></ol>
+        </nav>
+      </section>
+
+      <section id="empty-no-notes" class="empty-state center-state" hidden>
+        <div class="onboarding-panel">
+          <div class="empty-state-icon" aria-hidden="true">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h12l4 4v12H4z"/><path d="M16 4v4h4"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+          </div>
+          <h3 id="empty-no-notes-title">No notes here</h3>
+          <p id="empty-no-notes-copy">Start a new note, or restore from a backup file.</p>
+          <div class="onboarding-actions">
+            <button id="empty-new-note" class="btn btn-primary" type="button">New note</button>
+            <button id="empty-import-notes" class="btn btn-secondary" type="button">Import backup</button>
+            <button id="empty-view-archive" class="btn btn-secondary" type="button" hidden>View Archive</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="empty-no-results" class="empty-state center-state" hidden>
+        <div class="empty-state-icon" aria-hidden="true">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        </div>
+        <h3>No matches</h3>
+        <p>Nothing matched your search or filter.</p>
+        <p><button id="clear-search-btn" class="btn btn-secondary" type="button">Clear search & filters</button></p>
+      </section>
+
+      <!-- Home: the stage when no note is open on a wide screen. home-desk.js
+           fills the date, greeting, counts, cards, and rows from notes already
+           in memory. -->
+      <section id="home-desk" class="home-desk" aria-labelledby="home-desk-greeting" hidden>
+        <div class="home-desk-inner">
+          <header class="home-desk-hello">
+            <div class="home-desk-hello-text">
+              <p id="home-desk-date" class="home-desk-date"></p>
+              <h2 id="home-desk-greeting" class="home-desk-greeting" tabindex="-1">Welcome back.</h2>
+              <p id="home-desk-sub" class="home-desk-sub"></p>
+            </div>
+            <button id="home-desk-new" class="btn btn-primary home-desk-new" type="button" title="New note (⌘N)" aria-keyshortcuts="Meta+N Control+N">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              <span>New note</span>
+            </button>
+          </header>
+
+          <div class="home-desk-tiles" role="group" aria-label="Quick starts">
+            <button id="home-desk-today" class="home-desk-tile" type="button" aria-keyshortcuts="Meta+Shift+D Control+Shift+D">
+              <span class="home-desk-tile-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/></svg>
+              </span>
+              <span class="home-desk-tile-text">
+                <span class="home-desk-tile-head">
+                  <span class="home-desk-tile-title">Today’s note</span>
+                  <kbd class="home-desk-kbd" aria-hidden="true">⌘⇧D</kbd>
+                </span>
+                <span id="home-desk-today-meta" class="home-desk-tile-meta">Not started yet</span>
+              </span>
+            </button>
+            <button id="home-desk-capture" class="home-desk-tile" type="button" aria-keyshortcuts="Meta+Shift+Space Control+Shift+Space">
+              <span class="home-desk-tile-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3 5 14h6l-1 7 8-11h-6z"/></svg>
+              </span>
+              <span class="home-desk-tile-text">
+                <span class="home-desk-tile-head">
+                  <span class="home-desk-tile-title">Quick capture</span>
+                  <kbd class="home-desk-kbd" aria-hidden="true">⌘⇧Space</kbd>
+                </span>
+                <span class="home-desk-tile-meta">Add a line to today’s note</span>
+              </span>
+            </button>
+            <button id="home-desk-template" class="home-desk-tile" type="button">
+              <span class="home-desk-tile-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 9h16M9 9v11"/></svg>
+              </span>
+              <span class="home-desk-tile-text">
+                <span class="home-desk-tile-head">
+                  <span class="home-desk-tile-title">From a template</span>
+                </span>
+                <span id="home-desk-template-meta" class="home-desk-tile-meta">Uses a folder named Templates</span>
+              </span>
+            </button>
+          </div>
+
+          <section class="home-desk-section" aria-labelledby="home-desk-pinned-title">
+            <div class="home-desk-section-head">
+              <h3 id="home-desk-pinned-title" class="home-desk-section-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 4h6l-1 6 3 3H7l3-3-1-6z"/></svg>
+                Pinned
+              </h3>
+              <button id="home-desk-pins-more" class="home-desk-link" type="button" aria-expanded="false" aria-controls="home-desk-pins" hidden>Show all</button>
+            </div>
+            <ul id="home-desk-pins" class="home-desk-cards"></ul>
+            <p id="home-desk-pins-empty" class="home-desk-empty" hidden>Nothing pinned yet. Choose Pin note from a note’s More actions menu to keep it here.</p>
+          </section>
+
+          <section class="home-desk-section" aria-labelledby="home-desk-recent-title">
+            <div class="home-desk-section-head">
+              <h3 id="home-desk-recent-title" class="home-desk-section-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+                Recently edited
+              </h3>
+              <div id="home-desk-layout" class="segmented home-desk-layout" role="group" aria-label="Recent notes layout">
+                <button type="button" data-desk-layout="list" aria-pressed="true" aria-label="List" title="List">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg>
+                </button>
+                <button type="button" data-desk-layout="grid" aria-pressed="false" aria-label="Grid" title="Grid">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
+                </button>
+              </div>
+            </div>
+            <div id="home-desk-chips" class="home-desk-chips" role="group" aria-label="Show recent notes from" hidden></div>
+            <ul id="home-desk-recent" class="home-desk-recent"></ul>
+          </section>
+
+          <section id="home-desk-tags" class="home-desk-section" aria-labelledby="home-desk-tags-title" hidden>
+            <div class="home-desk-section-head">
+              <h3 id="home-desk-tags-title" class="home-desk-section-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 9h14M5 15h14M10 3 8 21M16 3l-2 18"/></svg>
+                Tags
+              </h3>
+              <button id="home-desk-manage-tags" class="home-desk-link" type="button">Manage tags</button>
+            </div>
+            <div id="home-desk-tag-list" class="home-desk-tag-list" role="group" aria-label="Most used tags"></div>
+          </section>
+
+          <p class="home-desk-privacy">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+            Everything on Home comes from this browser. Nothing here is sent anywhere.
+          </p>
+        </div>
+      </section>
+
+      <section id="empty-trash" class="empty-state center-state" hidden>
+        <div class="empty-state-icon" aria-hidden="true">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg>
+        </div>
+        <h3>Trash is empty</h3>
+        <p>Deleted notes stay here until you permanently remove them.</p>
+      </section>
+
+      <section id="empty-archive" class="empty-state center-state" hidden>
+        <div class="empty-state-icon" aria-hidden="true">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16v13H4z"/><path d="M3 4h18v4H3z"/><path d="M9 12h6"/></svg>
+        </div>
+        <h3>Archive is empty</h3>
+        <p>Notes you archive will remain available here.</p>
+      </section>
+    </main>
+  </div>
+
+  <footer class="shell-foot">
+    <nav class="shell-foot-links" aria-label="Site">
+      <a href="guide.html">Guide</a>
+      <a href="about.html">About</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="terms.html">Terms</a>
+    </nav>
+    <span class="shell-foot-divider" aria-hidden="true"></span>
+    <span class="shell-foot-meta">
+      <span>v<span id="shell-version">—</span></span>
+      <span aria-hidden="true">·</span>
+      <span>deployed <span id="shell-build-date">—</span></span>
+      <span aria-hidden="true">·</span>
+      <a href="https://vinny.dev" target="_blank" rel="noopener noreferrer">vinny.dev</a>
+    </span>
+  </footer>
+
+  <button id="focus-exit-btn" class="btn btn-secondary btn-sm focus-exit-btn" type="button" title="Exit focus mode (⌘/Ctrl+Shift+F)" hidden>Exit focus</button>
+
+  <div id="folder-switcher" class="folder-switcher" role="dialog" aria-label="Switch folder" hidden>
+    <div class="folder-switcher-head">
+      <label class="visually-hidden" for="folder-switcher-search">Find a folder</label>
+      <input id="folder-switcher-search" class="input folder-switcher-search" type="search" placeholder="Find a folder" autocomplete="off" />
+    </div>
+    <div id="folder-switcher-list" class="folder-switcher-list" aria-label="Folders"></div>
+    <button id="folder-switcher-new" class="folder-switcher-new" type="button">New folder</button>
+  </div>
+
+  <div id="folder-menu" class="popover-menu folder-menu" role="menu" hidden>
+    <button role="menuitem" type="button" data-action="rename">Rename…</button>
+    <button role="menuitem" type="button" data-action="new-note">New note here</button>
+    <hr class="menu-divider"/>
+    <button role="menuitem" type="button" data-action="move-up">Move up</button>
+    <button role="menuitem" type="button" data-action="move-down">Move down</button>
+    <hr class="menu-divider"/>
+    <button role="menuitem" type="button" data-action="delete" class="is-destructive">Delete…</button>
+  </div>
+
+  <dialog id="folder-dialog" class="dialog" aria-labelledby="folder-dialog-title">
+    <div class="dialog-head">
+      <h2 id="folder-dialog-title">New folder</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body">
+      <label class="field-label" for="folder-name-input">Name</label>
+      <input id="folder-name-input" class="input" type="text" maxlength="60" autocomplete="off" spellcheck="false" />
+      <p id="folder-name-error" class="field-error" role="alert" hidden></p>
+      <fieldset class="folder-swatches">
+        <legend class="field-label">Color</legend>
+        <label class="swatch"><input type="radio" name="folder-color" value="" checked /><span class="swatch-chip" data-color=""></span><span class="visually-hidden">None</span></label>
+        <label class="swatch"><input type="radio" name="folder-color" value="accent" /><span class="swatch-chip" data-color="accent"></span><span class="visually-hidden">Accent</span></label>
+        <label class="swatch"><input type="radio" name="folder-color" value="olive" /><span class="swatch-chip" data-color="olive"></span><span class="visually-hidden">Olive</span></label>
+        <label class="swatch"><input type="radio" name="folder-color" value="sky" /><span class="swatch-chip" data-color="sky"></span><span class="visually-hidden">Sky</span></label>
+        <label class="swatch"><input type="radio" name="folder-color" value="gray" /><span class="swatch-chip" data-color="gray"></span><span class="visually-hidden">Gray</span></label>
+      </fieldset>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Cancel</button>
+      <button id="folder-dialog-save" class="btn btn-primary" type="button">Save</button>
+    </div>
+  </dialog>
+
+  <dialog id="move-note-dialog" class="dialog" aria-labelledby="move-note-title">
+    <div class="dialog-head">
+      <h2 id="move-note-title">Move to folder</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body"><div id="move-folder-list" class="move-folder-list"></div></div>
+  </dialog>
+
+  <dialog id="folder-delete-dialog" class="dialog" aria-labelledby="folder-delete-title">
+    <div class="dialog-head">
+      <h2 id="folder-delete-title">Delete this folder?</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body"><p id="folder-delete-copy"></p></div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Cancel</button>
+      <button id="folder-delete-keep" class="btn btn-primary" type="button">Keep the notes</button>
+      <button id="folder-delete-trash" class="btn btn-danger" type="button">Move to Trash</button>
+    </div>
+  </dialog>
+
+  <dialog id="delete-dialog" class="dialog" aria-labelledby="delete-dialog-title">
+    <div class="dialog-head">
+      <h2 id="delete-dialog-title">Delete this note?</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body">
+      <p>The note will move to Trash. You can restore it later or delete it forever from Trash.</p>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Cancel</button>
+      <button id="confirm-delete" class="btn btn-danger" type="button">Move to Trash</button>
+    </div>
+  </dialog>
+
+  <dialog id="permanent-delete-dialog" class="dialog" aria-labelledby="permanent-delete-dialog-title">
+    <div class="dialog-head">
+      <h2 id="permanent-delete-dialog-title">Permanently delete this note?</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body">
+      <p id="permanent-delete-copy">This removes the note, its draft, and its revision history from this browser.</p>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Cancel</button>
+      <button id="confirm-permanent-delete" class="btn btn-danger" type="button" data-hold-confirm>Hold to delete forever</button>
+    </div>
+  </dialog>
+
+  <dialog id="empty-trash-dialog" class="dialog" aria-labelledby="empty-trash-dialog-title">
+    <div class="dialog-head">
+      <h2 id="empty-trash-dialog-title">Empty Trash?</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body">
+      <p>Every note in Trash will be permanently removed from this browser.</p>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Cancel</button>
+      <button id="confirm-empty-trash" class="btn btn-danger" type="button" data-hold-confirm>Hold to empty Trash</button>
+    </div>
+  </dialog>
+
+  <dialog id="discard-dialog" class="dialog" aria-labelledby="discard-dialog-title">
+    <div class="dialog-head">
+      <h2 id="discard-dialog-title">Discard unsaved changes?</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body">
+      <p>You have unsaved edits. Leaving edit mode will lose them.</p>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Keep editing</button>
+      <button id="confirm-discard" class="btn btn-danger" type="button">Discard</button>
+    </div>
+  </dialog>
+
+  <dialog id="settings-dialog" class="dialog settings-dialog" aria-labelledby="settings-dialog-title">
+    <div class="dialog-head">
+      <h2 id="settings-dialog-title">Settings</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body settings-body">
+      <section class="settings-section" aria-labelledby="appearance-title">
+        <h3 id="appearance-title" class="about-subhead">Appearance</h3>
+        <div class="settings-row">
+          <span id="theme-choice-label" class="settings-term">Theme</span>
+          <div id="theme-choice" class="segmented theme-choice" role="group" aria-labelledby="theme-choice-label">
+            <button type="button" data-theme-choice="auto" aria-pressed="true">Auto</button>
+            <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+            <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <span id="open-to-label" class="settings-term">Open to</span>
+          <div id="open-to-choice" class="segmented open-to-choice" role="group" aria-labelledby="open-to-label" aria-describedby="open-to-hint">
+            <button type="button" data-open-to-choice="home" aria-pressed="true">Home</button>
+            <button type="button" data-open-to-choice="note" aria-pressed="false">Top note</button>
+          </div>
+          <p id="open-to-hint" class="settings-hint">Home shows pinned and recent notes. Top note opens the first note in your list. Phones always open to the list.</p>
+        </div>
+        <!-- The inline theme script at the end of this page is CSP-hashed and
+             binds to these two ids. It stays untouched; this hidden button
+             keeps it working. Remove both together. -->
+        <button id="theme-toggle" type="button" hidden tabindex="-1" data-theme-icon="auto" aria-label="Toggle theme"><span id="theme-label">auto</span></button>
+      </section>
+
+      <section id="diagnostics-panel" class="diagnostics-panel" aria-labelledby="diagnostics-title">
+        <h3 id="diagnostics-title" class="about-subhead">Your data</h3>
+        <dl class="data-stats">
+          <div>
+            <dt>Notes</dt>
+            <dd id="diagnostic-active-notes">Checking...</dd>
+          </div>
+          <div>
+            <dt>Revisions</dt>
+            <dd id="diagnostic-revisions">Checking...</dd>
+          </div>
+          <div>
+            <dt>Storage</dt>
+            <dd id="diagnostic-storage">Checking...</dd>
+          </div>
+        </dl>
+        <p class="data-meta">
+          Archived <span id="diagnostic-archived-notes">…</span>
+          <span aria-hidden="true">·</span>
+          Trash <span id="diagnostic-trashed-notes">…</span>
+          <span aria-hidden="true">·</span>
+          Drafts <span id="diagnostic-drafts">…</span>
+        </p>
+        <div class="data-status">
+          <div class="data-status-row">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span class="data-status-term">Storage protection</span>
+            <span id="diagnostic-storage-protection" class="data-status-value">Checking...</span>
+            <div class="data-status-actions">
+              <button id="protect-storage-btn" class="btn btn-secondary btn-sm" type="button">Protect local data</button>
+            </div>
+          </div>
+          <div class="data-status-row">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span class="data-status-term">Last backup</span>
+            <span id="diagnostic-last-backup" class="data-status-value">Checking...</span>
+          </div>
+          <div class="data-status-row">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span class="data-status-term">Offline cache</span>
+            <span id="diagnostic-offline-cache" class="data-status-value">Checking...</span>
+            <p id="offline-cache-hint" class="data-status-hint">A copy of the app itself, so Scratchpad opens with no connection. Your notes are not in it; they stay in this browser.</p>
+            <div class="data-status-actions">
+              <button id="refresh-offline-copy-btn" class="btn btn-secondary btn-sm" type="button">Refresh offline copy</button>
+              <button id="check-updates-btn" class="btn btn-secondary btn-sm" type="button">Check for updates</button>
+            </div>
+          </div>
+          <div id="linked-folder-row" class="data-status-row" hidden>
+            <span class="status-dot" aria-hidden="true"></span>
+            <span class="data-status-term">Linked folder</span>
+            <span id="linked-folder-status" class="data-status-value">Not linked</span>
+            <p id="linked-folder-hint" class="data-status-hint">Saves every note as a Markdown file in a folder you pick, and reads your edits back when you return to this tab.</p>
+            <div class="data-status-actions">
+              <button id="linked-folder-link" class="btn btn-secondary btn-sm" type="button">Link a folder…</button>
+              <button id="linked-folder-write" class="btn btn-secondary btn-sm" type="button" hidden>Write now</button>
+              <button id="linked-folder-read" class="btn btn-secondary btn-sm" type="button" hidden>Read now</button>
+              <button id="linked-folder-reconnect" class="btn btn-secondary btn-sm" type="button" hidden>Reconnect</button>
+              <button id="linked-folder-unlink" class="btn btn-ghost btn-sm" type="button" hidden>Unlink</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="danger-zone" aria-labelledby="danger-zone-title">
+        <div>
+          <h3 id="danger-zone-title" class="about-subhead">Erase local data</h3>
+          <p>Remove every note, draft, revision, and Scratchpad preference stored by this browser.</p>
+        </div>
+        <button id="erase-local-data-btn" class="btn btn-danger btn-sm" type="button">Erase local data</button>
+      </section>
+
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Close</button>
+    </div>
+  </dialog>
+
+  <dialog id="about-dialog" class="dialog about-dialog" aria-labelledby="about-dialog-title">
+    <div class="dialog-head">
+      <h2 id="about-dialog-title">About Scratchpad</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body about-body">
+      <p>
+        Scratchpad keeps everything you write in <strong>this browser only</strong>, using IndexedDB:
+        notes, folders, history, and any images you attach.
+        Nothing is uploaded, synced, or transmitted unless you deliberately create a share
+        link&mdash;and that copy is encrypted in this browser first. There are no accounts,
+        trackers, or analytics.
+      </p>
+      <p>
+        Clearing site data (or using private browsing) will erase your notes. Back up with
+        <em>Export</em> and restore with <em>Import</em>, both behind the backup chip at the
+        bottom of the sidebar.
+      </p>
+      <p>
+        Keep the sidebar calm as your library grows: <strong>Home</strong> shows pinned and
+        recently edited notes, while the <strong>Folders</strong> switcher opens one folder at a
+        time. Search opens a relevance-ranked result list across every folder in the current
+        Notes, Archive, or Trash view; narrow it with <code>tag:</code>, <code>title:</code>, or
+        <code>folder:</code>. Dragging a note opens the switcher so you can drop it into its new
+        home.
+      </p>
+
+      <h3 class="about-subhead">Keyboard shortcuts</h3>
+      <ul class="shortcut-list">
+        <li><kbd class="kbd">⌘/Ctrl</kbd> + <kbd class="kbd">N</kbd> — New note</li>
+        <li><kbd class="kbd">⌘/Ctrl</kbd> + <kbd class="kbd">E</kbd> — Edit the open note</li>
+        <li><kbd class="kbd">⌘/Ctrl</kbd> + <kbd class="kbd">S</kbd> — Save (in edit mode)</li>
+        <li><kbd class="kbd">⌘/Ctrl</kbd> + <kbd class="kbd">F</kbd> — Find and replace (in edit mode)</li>
+        <li><kbd class="kbd">⌘/Ctrl</kbd> + <kbd class="kbd">Shift</kbd> + <kbd class="kbd">D</kbd> — Open today’s note</li>
+        <li><kbd class="kbd">⌘/Ctrl</kbd> + <kbd class="kbd">Shift</kbd> + <kbd class="kbd">Space</kbd> — Quick capture</li>
+        <li><kbd class="kbd">⌘/Ctrl</kbd> + <kbd class="kbd">K</kbd> or <kbd class="kbd">/</kbd> — Focus search</li>
+        <li><kbd class="kbd">↑</kbd> / <kbd class="kbd">↓</kbd> — Move through search results</li>
+        <li><kbd class="kbd">Enter</kbd> — Open the focused search result</li>
+        <li><kbd class="kbd">⌘/Ctrl</kbd> + <kbd class="kbd">Shift</kbd> + <kbd class="kbd">P</kbd> — Command palette</li>
+        <li><kbd class="kbd">⌘/Ctrl</kbd> + <kbd class="kbd">Shift</kbd> + <kbd class="kbd">F</kbd> — Toggle focus mode</li>
+        <li><kbd class="kbd">Esc</kbd> — Clear search, or exit edit mode</li>
+        <li><kbd class="kbd">?</kbd> — Show these shortcuts</li>
+      </ul>
+    </div>
+    <div class="dialog-foot about-dialog-foot">
+      <div class="about-dialog-meta">
+        <a href="guide.html" target="_blank" rel="noopener">User guide</a>
+        <span class="sep" aria-hidden="true">·</span>
+        <a href="privacy.html">Privacy</a>
+        <span class="sep" aria-hidden="true">·</span>
+        <a href="terms.html">Terms</a>
+        <span class="sep" aria-hidden="true">·</span>
+        <span>v<span id="app-version">—</span></span>
+        <span class="sep" aria-hidden="true">·</span>
+        <span>built <span id="app-build-date">—</span></span>
+      </div>
+      <button class="btn btn-secondary" type="button" data-dialog-close>Close</button>
+    </div>
+  </dialog>
+
+  <dialog id="shortcuts-dialog" class="dialog shortcuts-dialog" aria-labelledby="shortcuts-dialog-title">
+    <div class="dialog-head">
+      <h2 id="shortcuts-dialog-title">Keyboard shortcuts</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body">
+      <ul id="shortcuts-list" class="shortcut-list"></ul>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Close</button>
+    </div>
+  </dialog>
+
+  <dialog id="draft-dialog" class="dialog" aria-labelledby="draft-dialog-title">
+    <div class="dialog-head">
+      <h2 id="draft-dialog-title">Recover unsaved draft?</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body">
+      <p id="draft-dialog-copy">Scratchpad found unsaved edits that are newer than the saved note.</p>
+    </div>
+    <div class="dialog-foot">
+      <button id="discard-draft" class="btn btn-secondary" type="button">Discard draft</button>
+      <button id="restore-draft" class="btn btn-primary" type="button">Restore draft</button>
+    </div>
+  </dialog>
+
+  <dialog id="history-dialog" class="dialog history-dialog" aria-labelledby="history-dialog-title">
+    <div class="dialog-head">
+      <h2 id="history-dialog-title">Revision history</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div id="history-list" class="dialog-body history-list"></div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Close</button>
+    </div>
+  </dialog>
+
+  <dialog id="import-preview-dialog" class="dialog import-preview-dialog" aria-labelledby="import-preview-title">
+    <div class="dialog-head">
+      <h2 id="import-preview-title">Import preview</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body">
+      <dl id="import-preview-counts" class="import-counts"></dl>
+      <div id="import-preview-errors" class="import-errors" hidden></div>
+      <fieldset class="import-options">
+        <legend>Conflicts</legend>
+        <label>
+          <input type="radio" name="import-conflict-mode" value="duplicate" checked />
+          <span class="import-choice">
+            <span>Import as duplicates</span>
+            <span class="import-consequence">Conflicting notes come in as copies; nothing is overwritten.</span>
+          </span>
+        </label>
+        <label>
+          <input type="radio" name="import-conflict-mode" value="replace" />
+          <span class="import-choice">
+            <span>Replace matching ids</span>
+            <span class="import-consequence">Existing notes with matching ids are overwritten.</span>
+          </span>
+        </label>
+        <label>
+          <input type="radio" name="import-conflict-mode" value="skip" />
+          <span class="import-choice">
+            <span>Skip conflicts</span>
+            <span class="import-consequence">Only new notes come in; conflicts stay untouched.</span>
+          </span>
+        </label>
+      </fieldset>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Cancel</button>
+      <button id="confirm-import" class="btn btn-primary" type="button">Import</button>
+    </div>
+  </dialog>
+
+  <dialog id="backup-passphrase-dialog" class="dialog" aria-labelledby="backup-passphrase-title">
+    <div class="dialog-head">
+      <h2 id="backup-passphrase-title">Encrypt backup</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body passphrase-form">
+      <p id="backup-passphrase-copy">Choose a passphrase. It cannot be recovered if you forget it.</p>
+      <div>
+        <label class="field-label" for="backup-passphrase">Passphrase</label>
+        <input id="backup-passphrase" class="input" type="password" autocomplete="new-password" />
+      </div>
+      <div id="backup-passphrase-confirm-wrap">
+        <label class="field-label" for="backup-passphrase-confirm">Confirm passphrase</label>
+        <input id="backup-passphrase-confirm" class="input" type="password" autocomplete="new-password" />
+      </div>
+      <label class="check-row"><input id="backup-passphrase-show" type="checkbox" /> Show passphrase</label>
+      <p id="backup-passphrase-error" class="field-error" role="alert" hidden></p>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Cancel</button>
+      <button id="confirm-encrypted-export" class="btn btn-primary" type="button">Export encrypted backup</button>
+      <button id="confirm-encrypted-import" class="btn btn-primary" type="button" hidden>Unlock backup</button>
+    </div>
+  </dialog>
+
+  <dialog id="save-conflict-dialog" class="dialog" aria-labelledby="save-conflict-title">
+    <div class="dialog-head">
+      <h2 id="save-conflict-title">This note changed in another tab</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body">
+      <p id="save-conflict-copy">Your edits are still open. Choose which version to keep.</p>
+    </div>
+    <div class="dialog-foot conflict-actions">
+      <button id="conflict-use-saved" class="btn btn-secondary" type="button">Use saved version</button>
+      <button id="conflict-save-copy" class="btn btn-secondary" type="button">Save mine as a copy</button>
+      <button id="conflict-keep-mine" class="btn btn-primary" type="button">Replace with mine</button>
+    </div>
+  </dialog>
+
+  <dialog id="erase-local-data-dialog" class="dialog" aria-labelledby="erase-local-data-title">
+    <div class="dialog-head">
+      <h2 id="erase-local-data-title">Erase all local data?</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body passphrase-form">
+      <div class="erase-zone">
+        <p class="zone-label zone-label-danger">This browser will forget</p>
+        <p>Every note, draft, revision, and Scratchpad preference — with no undo and no server copy to recover from. Export a backup first if you may need these notes again.</p>
+      </div>
+      <div>
+        <label class="field-label" for="erase-confirmation">Type <strong>ERASE</strong> to confirm</label>
+        <input id="erase-confirmation" class="input" type="text" autocomplete="off" spellcheck="false" />
+      </div>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Cancel</button>
+      <button id="confirm-erase-local-data" class="btn btn-danger" type="button" disabled>Erase everything</button>
+    </div>
+  </dialog>
+
+  <dialog id="erase-shares-dialog" class="dialog" aria-labelledby="erase-shares-title">
+    <div class="dialog-head">
+      <h2 id="erase-shares-title">Some share links stay live</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body"><p id="erase-shares-copy"></p></div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Cancel</button>
+      <button id="confirm-erase-anyway" class="btn btn-danger" type="button" data-hold-confirm>Hold to erase anyway</button>
+    </div>
+  </dialog>
+
+  <dialog id="command-palette-dialog" class="dialog command-palette-dialog" aria-labelledby="command-palette-title">
+    <div class="dialog-head">
+      <h2 id="command-palette-title">Command palette</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body command-palette-body">
+      <input
+        id="command-palette-input"
+        class="input"
+        type="search"
+        placeholder="Search commands or notes..."
+        autocomplete="off"
+        spellcheck="false"
+        role="combobox"
+        aria-label="Search commands and notes"
+        aria-autocomplete="list"
+        aria-expanded="false"
+        aria-controls="command-palette-list"
+        aria-describedby="command-palette-instructions"
+      />
+      <p id="command-palette-instructions" class="visually-hidden">
+        Type to filter. Use the Up and Down arrow keys to choose a result, then press Enter.
+      </p>
+      <div id="command-palette-list" class="command-palette-list" role="listbox" aria-label="Commands and notes"></div>
+      <p id="command-palette-empty" class="muted-copy" hidden>No commands or notes found.</p>
+      <p
+        id="command-palette-status"
+        class="visually-hidden"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      ></p>
+      <div class="command-palette-foot" aria-hidden="true">
+        <span><kbd class="kbd">↑↓</kbd> navigate</span>
+        <span><kbd class="kbd">↵</kbd> open</span>
+        <span><kbd class="kbd">esc</kbd> close</span>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="tag-manager-dialog" class="dialog tag-manager-dialog" aria-labelledby="tag-manager-title">
+    <div class="dialog-head">
+      <h2 id="tag-manager-title">Manage tags</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div id="tag-manager-list" class="dialog-body tag-manager-list"></div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Close</button>
+    </div>
+  </dialog>
+
+  <dialog id="tag-delete-dialog" class="dialog" aria-labelledby="tag-delete-title">
+    <div class="dialog-head">
+      <h2 id="tag-delete-title">Delete this tag?</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body">
+      <p id="tag-delete-copy">This removes the tag from matching active notes.</p>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Cancel</button>
+      <button id="confirm-tag-delete" class="btn btn-danger" type="button">Delete tag</button>
+    </div>
+  </dialog>
+
+  <dialog id="bulk-tag-dialog" class="dialog" aria-labelledby="bulk-tag-title">
+    <div class="dialog-head">
+      <h2 id="bulk-tag-title">Add tag to selected notes</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body">
+      <label class="field-label" for="bulk-tag-input">Tag</label>
+      <input id="bulk-tag-input" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="review" />
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Cancel</button>
+      <button id="bulk-apply-tag" class="btn btn-primary" type="button">Add tag</button>
+    </div>
+  </dialog>
+
+  <dialog id="link-rename-dialog" class="dialog" aria-labelledby="link-rename-title">
+    <div class="dialog-head">
+      <h2 id="link-rename-title">Update links?</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body">
+      <p id="link-rename-copy"></p>
+      <p class="muted-copy">Updated notes keep a revision, so this is reversible.</p>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Leave them</button>
+      <button id="confirm-link-rename" class="btn btn-primary" type="button">Update links</button>
+    </div>
+  </dialog>
+
+  <dialog id="quick-capture-dialog" class="dialog quick-capture-dialog" aria-label="Quick capture">
+    <div class="dialog-body">
+      <p id="quick-capture-description" class="visually-hidden">
+        Add a timestamped line to today’s note.
+      </p>
+      <div class="quick-capture-control">
+        <label class="visually-hidden" for="quick-capture-input">Capture text</label>
+        <input
+          id="quick-capture-input"
+          class="input"
+          type="text"
+          placeholder="What’s on your mind?"
+          autocomplete="off"
+          spellcheck="true"
+          aria-describedby="quick-capture-description"
+        />
+        <button
+          id="quick-capture-submit"
+          class="quick-capture-submit"
+          type="button"
+          aria-label="Add to today’s note"
+          title="Add to today’s note"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M5 12h13M13 7l5 5-5 5" />
+          </svg>
+        </button>
+      </div>
+      <div class="quick-capture-hint">
+        <p id="quick-capture-preview" class="quick-capture-preview" aria-hidden="true"></p>
+        <span id="quick-capture-destination" class="quick-capture-destination">Today’s note</span>
+        <span class="quick-capture-shortcut"><kbd>Enter</kbd> to capture</span>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="share-dialog" class="dialog share-dialog" aria-labelledby="share-dialog-title">
+    <div class="dialog-head">
+      <h2 id="share-dialog-title">Share this note</h2>
+      <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+    </div>
+    <div class="dialog-body">
+      <div class="share-zone share-zone-local">
+        <p class="zone-label zone-label-local"><span class="zone-dot" aria-hidden="true"></span>On this device — nothing is sent</p>
+        <p id="share-mailto-warning" class="share-warning" hidden>
+          This note is long. The email draft will be truncated; copy to clipboard to send the full note.
+        </p>
+        <div class="share-actions">
+          <button id="share-copy" class="btn btn-primary" type="button">Copy to clipboard</button>
+          <button id="share-email" class="btn btn-secondary" type="button">Open in email</button>
+        </div>
+        <p id="share-status" class="share-status" role="status" aria-live="polite" hidden></p>
+      </div>
+
+      <section class="share-link-section share-zone share-zone-public" aria-labelledby="share-link-heading">
+        <h3 id="share-link-heading" class="share-link-heading zone-label zone-label-public">Public link — uploads an encrypted copy</h3>
+
+        <div id="share-explainer" class="share-explainer" hidden>
+          <p>A public link uploads an <strong>encrypted copy</strong> of this note’s title, text, and tags.</p>
+          <ul class="share-explainer-list">
+            <li>The key that decrypts it stays in the link itself and is never sent to the server, so Scratchpad can’t read a shared note.</li>
+            <li><strong>Anyone with the link can read and forward it.</strong> There is no password.</li>
+            <li>The link stops working after the time you pick — 7 to 30 days. You can stop sharing sooner.</li>
+            <li>None of your other notes are uploaded, and editing stays private until you explicitly update a shared link.</li>
+          </ul>
+        </div>
+
+        <p class="share-update-explainer">Update shared link replaces that copy for everyone with the link. Its URL and expiry stay the same. Create a new link to keep the older copy available.</p>
+        <ul id="share-link-list" class="share-link-list"></ul>
+
+        <div class="share-expiry-picker">
+          <label for="share-expiry-days">New link expires after</label>
+          <select id="share-expiry-days" class="share-expiry-select">
+            <option value="7" selected>7 days</option>
+            <option value="14">14 days</option>
+            <option value="21">21 days</option>
+            <option value="30">30 days</option>
+          </select>
+        </div>
+
+        <button id="create-share-link" class="btn btn-secondary" type="button">Create public link</button>
+        <p id="share-link-error" class="share-link-error" role="alert" hidden></p>
+      </section>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-secondary" type="button" data-dialog-close>Close</button>
+    </div>
+  </dialog>
+
+  <aside id="pwa-update-notice" class="pwa-update-notice" aria-labelledby="pwa-update-title" hidden>
+    <div>
+      <strong id="pwa-update-title">Scratchpad update ready</strong>
+      <p>Reload when you are ready. Unsaved drafts stay in this browser.</p>
+    </div>
+    <div class="pwa-update-actions">
+      <button id="pwa-update-later" class="btn btn-secondary btn-sm" type="button">Later</button>
+      <button id="pwa-update-reload" class="btn btn-primary btn-sm" type="button">Reload</button>
+    </div>
+  </aside>
+
+  <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="false"></div>
+
+  <template id="tpl-pin-icon">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 4h6l-1 6 3 3H7l3-3-1-6z"/></svg>
+  </template>
+
+  <template id="tpl-share-icon">
+    <svg class="note-share-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>
+  </template>
+
+  <template id="tpl-home-icon">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11 12 4l8 7"/><path d="M6 9.5V20h12V9.5"/></svg>
+  </template>
+
+  <template id="tpl-desk-note-icon">
+    <svg class="home-desk-row-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
+  </template>
+
+  <script src="/public/js/vendor/marked.min.js"></script>
+  <script src="/public/js/vendor/purify.min.js"></script>
+  <script src="/public/js/vendor/prism.min.js" data-manual></script>
+  <script src="/public/js/crypto.js"></script>
+  <script src="/public/js/db.js"></script>
+  <script src="/public/js/version.js"></script>
+  <script src="/public/js/markdown.js"></script>
+  <script src="/public/js/zip.js"></script>
+  <script src="/public/js/seed.js"></script>
+  <script src="/public/js/search.js"></script>
+  <script src="/public/js/search-view.js"></script>
+  <script src="/public/js/command-bar.js"></script>
+  <script src="/public/js/dialogs.js"></script>
+  <script src="/public/js/editor-format.js"></script>
+  <script src="/public/js/find-replace.js"></script>
+  <script src="/public/js/html-to-markdown.js"></script>
+  <script src="/public/js/paste.js"></script>
+  <script src="/public/js/mentions.js"></script>
+  <script src="/public/js/templates.js"></script>
+  <script src="/public/js/attachments.js"></script>
+  <script src="/public/js/linked-folder.js"></script>
+  <script src="/public/js/shared-copy.js"></script>
+  <script src="/public/js/toast.js"></script>
+  <script src="/public/js/hold-confirm.js"></script>
+  <script src="/public/js/swipe-row.js"></script>
+  <script src="/public/js/mobile-view.js"></script>
+  <script src="/public/js/settings.js"></script>
+  <script src="/public/js/home-desk-view.js"></script>
+  <script src="/public/js/home-desk.js"></script>
+  <script src="/public/js/note-breadcrumb.js"></script>
+  <script src="/public/js/shortcuts-sheet.js"></script>
+  <script src="/public/js/outline.js"></script>
+  <script src="/public/js/reading-place.js"></script>
+  <script src="/public/js/revision-diff.js"></script>
+  <script src="/public/js/share-store.js"></script>
+  <script src="/public/js/share-manager.js"></script>
+  <script src="/public/js/share-controls.js"></script>
+  <script src="/public/js/app.js"></script>
+
+  <script>
+    (function () {
+      const root = document.documentElement;
+      const btn = document.getElementById('theme-toggle');
+      const label = document.getElementById('theme-label');
+      const KEY = 'theme-preview';
+      const order = ['auto', 'light', 'dark'];
+      function apply(s) {
+        if (s === 'auto') root.removeAttribute('data-theme');
+        else root.setAttribute('data-theme', s);
+        if (label) label.textContent = s;
+        if (btn) {
+          btn.setAttribute('data-theme-icon', s);
+          btn.setAttribute('aria-label', 'Theme: ' + s + ' (click to change)');
+        }
+      }
+      let current = localStorage.getItem(KEY) || 'auto';
+      if (!order.includes(current)) current = 'auto';
+      apply(current);
+      btn.addEventListener('click', () => {
+        current = order[(order.indexOf(current) + 1) % order.length];
+        localStorage.setItem(KEY, current);
+        apply(current);
+      });
+    })();
+  </script>
+</body>
+</html>

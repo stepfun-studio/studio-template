@@ -1,0 +1,76 @@
+// @ts-check
+const { test, expect, devices } = require('@playwright/test');
+const { gotoApp, seedRawNotes } = require('./helpers');
+
+test.use({ ...devices['iPhone 13'] });
+
+test.describe('mobile navigation — list/editor view switching', () => {
+  test('starts on the list, opens a note into the editor, and returns via Back', async ({ page }) => {
+    await seedRawNotes(page, [
+      { id: 'mobile-a', title: 'Mobile A', body: 'Body A.' },
+      { id: 'mobile-b', title: 'Mobile B', body: 'Body B.' },
+    ]);
+
+    await expect(page.locator('#app-shell')).toHaveClass(/mobile-list/);
+    await expect(page.locator('#app-shell')).not.toHaveClass(/mobile-editor/);
+    await expect(page.locator('.note-row').first()).toBeVisible();
+
+    await page.locator('[data-id="mobile-a"]').click();
+    await expect(page.locator('#app-shell')).toHaveClass(/mobile-editor/);
+    await expect(page.locator('#note-title-display')).toHaveText('Mobile A');
+
+    await page.locator('#back-to-list').click();
+    await expect(page.locator('#app-shell')).toHaveClass(/mobile-list/);
+    await expect(page.locator('#app-shell')).not.toHaveClass(/mobile-editor/);
+  });
+
+  test('tapping the already-selected note still opens the editor', async ({ page }) => {
+    await seedRawNotes(page, [{ id: 'mobile-a', title: 'Mobile A', body: 'Body A.' }]);
+
+    await page.locator('[data-id="mobile-a"]').click();
+    await expect(page.locator('#app-shell')).toHaveClass(/mobile-editor/);
+
+    await page.locator('#back-to-list').click();
+    await expect(page.locator('#app-shell')).toHaveClass(/mobile-list/);
+
+    // The note stays selected after Back, so this tap hits selectNote()'s
+    // early-return path. It must still switch the mobile view to the editor.
+    await page.locator('[data-id="mobile-a"]').click();
+    await expect(page.locator('#app-shell')).toHaveClass(/mobile-editor/);
+  });
+
+  test('creating a note switches straight to the editor view', async ({ page }) => {
+    await gotoApp(page);
+    await expect(page.locator('#app-shell')).toHaveClass(/mobile-list/);
+
+    await page.locator('#new-note').click();
+    await expect(page.locator('#app-shell')).toHaveClass(/mobile-editor/);
+    await expect(page.locator('#note-editor')).toBeVisible();
+  });
+
+  test('opening a note from the keyboard moves focus into the editor pane', async ({ page }) => {
+    await seedRawNotes(page, [{ id: 'mobile-a', title: 'Mobile A', body: 'Body A.' }]);
+
+    const open = page.getByRole('button', { name: 'Open Mobile A' });
+    await open.focus();
+    await open.press('Enter');
+    await expect(page.locator('#app-shell')).toHaveClass(/mobile-editor/);
+    await expect(page.locator('#note-title-display')).toBeFocused();
+  });
+
+  test('Back returns focus to the note that was open', async ({ page }) => {
+    await seedRawNotes(page, [
+      { id: 'mobile-a', title: 'Mobile A', body: 'Body A.' },
+      { id: 'mobile-b', title: 'Mobile B', body: 'Body B.' },
+    ]);
+
+    await page.locator('[data-id="mobile-b"]').click();
+    await expect(page.locator('#app-shell')).toHaveClass(/mobile-editor/);
+
+    const back = page.locator('#back-to-list');
+    await back.focus();
+    await back.press('Enter');
+    await expect(page.locator('#app-shell')).toHaveClass(/mobile-list/);
+    await expect(page.getByRole('button', { name: 'Open Mobile B' })).toBeFocused();
+  });
+});

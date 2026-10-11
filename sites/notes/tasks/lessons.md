@@ -1,0 +1,216 @@
+# Project lessons
+
+- Serve only through `scripts/dev-server.mjs`; generic static servers expose
+  private and operator-only repository files.
+- Treat the v18 greenfield quality thresholds as ratchet targets for the legacy
+  application, and report the measured gap rather than claiming compliance.
+- Verify vendored package currency against the live registry before replacing
+  an artifact; prior scan results are orientation, not current evidence.
+- Characterize a retired internal path at the public behavior boundary before
+  removing it; search remains a single title/body/tag operation without keeping
+  dead scope state or rendering branches.
+- Centralize repeated action-menu mechanics, but keep context-specific work in
+  hooks. Nested overlays need explicit keyboard-listener ownership so Escape can
+  close the child menu and restore focus without dismissing its parent.
+- Put shell geometry and semantic surfaces in the base CSS cascade. Responsive
+  rules should change layout mode, not re-declare the same radius, shadow,
+  backdrop, and background contract at every breakpoint.
+- Ratchets are only honest when their measured baselines tighten after a
+  simplification. This pass reduced deep functions from 13 to 12 and raised the
+  deterministic browser coverage floor from 35.67% to 36.2%.
+- `check:format` sweeps every changed AND untracked supported file, while
+  `public/css/app.css` and `public/js/app.js` are format-baseline legacy
+  exemptions. When it fails, read which file it actually checked — and never
+  run `biome format --write` on a legacy file to satisfy it: that reformats
+  the whole file and buries the real change under ~1,200 lines of churn.
+- The structure ratchet counts EVERY function — test bodies and
+  test.describe callbacks included — and pins app.js's total line count.
+  Features pay their way: pure logic goes into a new v18-clean module
+  (window.ScratchpadX, precached in both service workers' shell list,
+  opted into jsconfig include), and app.js edits net out at or below the
+  recorded ceiling. A new test that grows a describe block past 40 lines
+  belongs in its own describe or spec file.
+- Measuring a flake with the wrong instrument creates new bugs to chase. This
+  round: a `window.open` probe wrapper suppressed the very popup it measured
+  (a blocked no-gesture attempt poisons later opens); a service-worker stub
+  and a pristine-browser probe changed the answer under test;
+  `context.pages()` cannot see lazily unattached popups; and dev-server
+  request logs are polluted by per-context SW precache installs. Ground
+  truth needs an instrument outside the thing being measured — or better, a
+  bisect over the tree.
+- The guide popup failure was never app behavior: `window.open` from the
+  palette is deterministic solo and in every suite subset, and only Playwright's
+  new-page target attach starves under sustained suite-machine saturation
+  (observed: a fresh browser launch took 73s in failing runs; ambient machine
+  load moves the threshold run to run). No timeout budget (30s through 120s),
+  retry count, worker count, pristine browser process, or suite split made
+  target attach reliable under saturation — a two-half split that passed twice
+  in the morning failed to replicate in the afternoon. The gate that survives
+  a busy machine keeps the test out of the saturated run: full suite minus the
+  popup test, then the popup test solo (`scripts/release-gate.mjs`). CI
+  (workers: 1, retries: 2) stays authoritative for PRs.
+- Correction (2026-10): the guide popup failure WAS app behavior. Feature
+  modules wrapped code in a bare block with `('use strict');`, which is an
+  expression, not a directive. In sloppy mode, block-level function
+  declarations also land on `window` (Annex B), so find-replace.js's `open()`
+  replaced `window.open` and the palette's "Open user guide" never opened a
+  tab. Modules now start with a real script-level `'use strict';`, and
+  tests/script-scope.spec.js asserts the built-ins stay native. When a test
+  fails the same way in every browser on every retry, suspect the code before
+  the machine.
+- Assert on state that only exists after the change. A `toHaveCount(n)` that
+  the pre-search list already satisfies passes before the 150ms search
+  debounce fires and then reads stale rows; poll the row ids with
+  `expect.poll` or assert the results counter first. Three v3.20 tests passed
+  red for exactly this reason.
+- The structure ratchet counts app.js lines as `wc -l` + 1 (the trailing
+  newline is a line). A recorded ceiling of 6204 with wc at 6203 is zero
+  slack: every added app.js line needs a removed one in the same change.
+- Firefox's `ClipboardEvent` constructor accepts a `clipboardData` member but
+  exposes a protected DataTransfer whose `getData` returns empty strings, so a
+  synthetic paste can never be observed there. Detect it by reading the
+  payload back and skip with a reason; prove the real path in Chromium with
+  `context.grantPermissions(['clipboard-read', 'clipboard-write'])`,
+  `navigator.clipboard.write`, and a real `ControlOrMeta+v`.
+- Plain-text paste is a browser shortcut that differs by platform:
+  Ctrl+Shift+V on Windows and Linux, Cmd+Shift+V in Firefox on a Mac, and
+  Cmd+Option+Shift+V in Chrome and Safari on a Mac. Do not document
+  "Cmd/Ctrl+Shift+V" as if it were universal, and do not expect headless
+  Chromium on macOS to route it.
+- commitlint here enforces a 72-character header and a lower-case subject,
+  so product names like DOMParser cannot appear in a commit subject.
+- Verify an exploration agent's claim about a module's exports by reading
+  the export object before designing against it. `scanOutsideFences` was
+  reported as exported and was private; the mentions feature silently found
+  nothing until the probe showed `keys` of the global.
+- When summarizing a Playwright run, never `tail` the failure list. A cut
+  list made Chromium look green while all three browsers had failed the same
+  tests, and the missing lines hid the real cause for a round.
+- Playwright reuses whatever answers on the configured port. A stray
+  `python -m http.server 8080` served another site to every test; run with
+  `SCRATCHPAD_TEST_PORT=<free port>` and never assert a literal port inside
+  a test.
+- Touching a never-formatted non-exempt file drags the whole file into the
+  format sweep. Land a separate `style:` commit first (checkout, format,
+  commit), then the feature diff stays readable; check the structure
+  ratchet after formatting because expanded fixtures can push a describe or
+  a test past 40 lines.
+- WebKit cannot store an in-memory Blob in IndexedDB ("Error preparing
+  Blob/File data"); persist an ArrayBuffer and build Blobs on read.
+- The pre-commit innerHTML guard reads file names from `+++` headers; with
+  `diff.mnemonicPrefix` those arrive as `i/…`, which defeated the vendor
+  exemption until the prefix strip accepted any single letter.
+- Concurrent async event handlers that insert into the same textarea race;
+  serialize them through one promise queue rather than loosening tests.
+- Playwright's `hasText` string filter is case-insensitive and substring-
+  based: "Old" matched "folder". Use a regex when the intent is exact.
+- A write-back that keys off "note missing from memory" is a delete waiting
+  to happen whenever memory lags the database. The linked folder's read
+  adopts files through `putNoteRecord` and only reloads `state.notes` after
+  the whole walk, so any read longer than the 800 ms flush timer looked like
+  a mass trash and removed its own source files. Hold write-backs while a
+  read is in flight (a counter, since reads overlap), keep `pending` intact,
+  and schedule the deferred flush from the read's `finally`. To reproduce a
+  timing race deterministically in Playwright, slow the real seam
+  (`window.ScratchpadDB.put`) instead of piling on fixtures.
+- Biome exits 1 when every path handed to it is ignored under
+  `files.includes`. Excluding a tool directory in biome.json alone blocks any
+  commit where that directory holds the only changed JSON file. The
+  changed-file sweep's own `excluded` regex needs the same entry. The failure
+  hides until the ignored file is the sole candidate.
+- A CSS custom property that no stylesheet defines makes its declaration
+  invalid, and inherited properties such as `color` fall back to the parent.
+  `.share-link-error` pointed at a nonexistent `--danger` and rendered in body
+  ink; the danger token is `--rust`. Before reusing a class, grep for its
+  token's definition. Guard state colors by comparing computed colors against
+  a probe element that uses the token.
+- `check-structure.mjs` measures a function from its first line to its last.
+  Boot `init` in app.js sits near 40 lines. Wiring a new module there can add
+  a long function even while app.js stays under its line ceiling, so count
+  the containing function, not just the file.
+- zsh does not word-split an unquoted `$var`. `git diff -- $files` with a
+  space-separated list passes one nonexistent path and silently diffs
+  nothing, which made a dash scan report clean. Spell out the paths or use an
+  array.
+- Playwright's `page.waitForFunction` does not await an async predicate. The
+  returned Promise is truthy, so the wait passes at once; a probe predicate
+  that always resolved `false` returned in 68 ms on 1.62.1. Poll async state
+  with `expect.poll(() => page.evaluate(...))` instead. The quick capture test
+  flaked in CI this way, and `wikilinks.spec.js` and `pwa.spec.js` still use
+  the async form.
+- Confirm a path is free before writing a new file there. `tests/README.md`
+  did not list `tests/quick-capture.spec.js`, and the Write tool overwrote
+  that tracked, never-read file without refusing. A `git status` pre-check
+  caught it before any commit.
+- Playwright keeps one browser cache per machine, and another project's
+  `playwright install` can replace the builds this repo's pinned version
+  needs. "Executable doesn't exist at ...chromium_headless_shell-1234" means
+  that, not a broken test. `node_modules/.bin/playwright install chromium
+  firefox webkit` restores them without touching the newer builds.
+- The format sweep covers untracked files, so one unformatted scratch file at
+  the repo root (a new `.mcp.json`) blocks every commit in the repo. Format it
+  in place with Biome and leave it uncommitted.
+- commitlint reads a body line that starts with `word: ` as a footer and warns
+  that the footer needs a leading blank line. Start body lines another way.
+- A render that replaces a node makes CSS transitions on it impossible: the
+  new node starts life in its final state. Mark the new node after the render
+  and run `@keyframes` on the mark. The task tick works this way.
+- Anything laid over a note row must be a sibling, not a child. Row children
+  inherit `pointer-events: none`, and the active row clips its overflow.
+- Two neighboring tokens are not a visible pair in both themes. `--rust-d` on
+  `--rust` is 1.23 to 1 in light and 1.12 to 1 in dark. A wash of `--ink` flips
+  with the theme, so it moves a fill away from the label color in both.
+- A hold implies hover. A hover color that matches the progress fill hides the
+  fill for every mouse user, so pin the resting color on a hold button.
+- Playwright clicks a position relative to the element's own box. A row
+  translated off screen has most of that box outside the viewport, so aim at
+  the part that is still visible.
+- `grep -E` has no `\d`. A failure filter written with it matches nothing and
+  reads as a clean run, and test titles that contain "failed" match a loose
+  filter. Use `^ +[0-9]+\) ` plus the summary counts.
+- The coarse-pointer block at the top of `app.css` runs before the base rules
+  it means to override, so an override there with equal specificity loses to
+  the later base rule. Put a phone override in its own `@media` block right
+  after the rule it adjusts, and check the measured box, not the source.
+- A `devices['iPhone 13']` context is 390px wide. A layout that only breaks at
+  375px needs an explicit `viewport` on `test.use`, or the red test never fires.
+- The structure ratchet counts app.js on every commit, so a feature that adds
+  lines there is planned with the extraction that pays for them, in the same
+  commit, or the pre-commit hook rejects it mid-task.
+
+- Commitlint here enforces an all-lowercase subject, so UI names such as
+  "Check for updates" or "Linked folder" must be lowercased in the subject
+  line. Keep the proper casing for the body.
+- Run the full three-browser suite before accepting a Playwright bump. The
+  bundled browsers change with it, and Playwright 1.63's Chromium
+  153.0.8010.12 crashed on reading a stored FileSystemDirectoryHandle from
+  IndexedDB after a reload. To tell a browser bug from an app bug, reproduce
+  it in a few lines with no app code, then run the same repro on the previous
+  Playwright and on installed Chrome.
+- Layout tests that measure where a line breaks pass on macOS and fail on
+  the Linux CI runners, whose fallback fonts are wider. v4.3.0 shipped a test
+  that required three buttons on one line at 390px; Linux wraps there. Assert
+  what the design promises (order, alignment, the wrapped path at a width
+  narrow enough to wrap everywhere), and require a fit only where there is
+  wide slack. Linux WebKit also has no `StorageManager`, so guard any
+  prototype stub and accept the state the app reports without it.
+- Deferring DOM that other tests read by text breaks them silently: the
+  History preview went lazy for a performance finding, and a cross-tab test
+  that looks for a revision's body in the dialog lost it. Defer the
+  expensive part only, and run `npm test`, not just the touched specs,
+  before pushing a change to shared markup.
+- A `<details>` toggle event fires after the click that opened it returns,
+  so a test that reads lazily built content must use a retrying assertion
+  (`toHaveText`), never a one-shot `allTextContents()`.
+- The palette matches loosely, so a query like "template" also fuzzy-matches
+  unrelated commands and only exact substring hits rank first. Assert on the
+  first option, never on the option count.
+- A palette meta longer than about 45 characters squeezes the label to an
+  ellipsis at the default dialog width. Keep metas short and check a
+  screenshot of any new command.
+- Before blaming a change for a red suite, run the failing specs on a clean
+  worktree of main with `node_modules` symlinked in, and compare with the CI
+  run for that commit. On 2026-10-08, 16 Chromium-only dirty-editor and
+  revision tests failed locally on main and this branch alike while CI was
+  green, which points at the local Chromium build.
+- zsh reserves `status`; `status=$?` aborts the command line. Use `rc`.

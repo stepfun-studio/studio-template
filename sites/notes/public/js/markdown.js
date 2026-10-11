@@ -1,0 +1,348 @@
+/* Scratchpad markdown rendering. Depends on marked and DOMPurify. */
+(function () {
+  'use strict';
+
+  const SAFE_URI_PATTERN = /^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+  const SANITIZE_CONFIG = Object.freeze({
+    USE_PROFILES: { html: true },
+    ADD_ATTR: ['target', 'rel'],
+    FORBID_TAGS: ['style', 'svg', 'math', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'textarea', 'select'],
+    FORBID_ATTR: ['style', 'srcset', 'formaction'],
+    ALLOW_DATA_ATTR: false,
+    ALLOWED_URI_REGEXP: SAFE_URI_PATTERN,
+    RETURN_DOM_FRAGMENT: true,
+  });
+
+  // blob: URLs are same-origin object URLs minted by attachments.js; they are
+  // admitted on img[src] only, never on links.
+  if (window.DOMPurify && typeof window.DOMPurify.addHook === 'function') {
+    window.DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+      const prefix = 'blob:' + window.location.origin + '/';
+      if (node.nodeName === 'IMG' && data.attrName === 'src' && data.attrValue.startsWith(prefix))
+        data.forceKeepAttr = true;
+    });
+  }
+
+  if (window.marked && typeof window.marked.setOptions === 'function') {
+    window.marked.setOptions({ breaks: false, gfm: true });
+  }
+
+  // GFM task-list checkboxes render as spans so the DOMPurify policy can keep
+  // forbidding <input>. App code makes them interactive in view mode; without
+  // it they are inert, which is the safe default.
+  if (window.marked && typeof window.marked.use === 'function') {
+    window.marked.use({
+      renderer: {
+        checkbox({ checked }) {
+          return (
+            '<span class="task-checkbox" role="checkbox" tabindex="0" aria-checked="' +
+            (checked ? 'true' : 'false') +
+            '"></span>'
+          );
+        },
+      },
+    });
+  }
+
+  const CALLOUT_PATTERN = /^\[!(note|tip|important|warning|caution)\](?:[ \t]+(.*))?$/i;
+
+  // GitHub-style callouts: a blockquote whose first paragraph starts with a
+  // [!KIND] line. That line becomes the title; the rest is re-lexed inline.
+  function tagCallout(token) {
+    if (token.type !== 'blockquote' || !token.tokens || !token.tokens.length) return;
+    const paragraph = token.tokens[0];
+    if (paragraph.type !== 'paragraph' || typeof paragraph.text !== 'string') return;
+    const lines = paragraph.text.split('\n');
+    const match = CALLOUT_PATTERN.exec(lines[0]);
+    if (!match) return;
+    token.callout = { kind: match[1].toLowerCase(), title: (match[2] || '').trim() };
+    const rest = lines.slice(1).join('\n');
+    if (!rest) {
+      token.tokens.shift();
+      return;
+    }
+    paragraph.text = rest;
+    paragraph.raw = rest;
+    paragraph.tokens = window.marked.Lexer.lexInline(rest);
+  }
+
+  function renderBlockquote(token) {
+    const body = this.parser.parse(token.tokens);
+    if (!token.callout) return '<blockquote>\n' + body + '</blockquote>\n';
+    const kind = token.callout.kind;
+    const title = token.callout.title || kind.charAt(0).toUpperCase() + kind.slice(1);
+    return (
+      '<blockquote class="callout callout-' +
+      kind +
+      '"><p class="callout-title">' +
+      escapeHtml(title) +
+      '</p>' +
+      body +
+      '</blockquote>\n'
+    );
+  }
+
+  function renderCode(token) {
+    const lang = String(token.lang || '')
+      .trim()
+      .split(/\s+/)[0]
+      .toLowerCase();
+    const prism = window.Prism;
+    const grammar = lang && prism && prism.languages ? prism.languages[lang] : null;
+    const inner = grammar ? prism.highlight(token.text, grammar, lang) : escapeHtml(token.text);
+    const attr = lang ? ' class="language-' + escapeHtml(lang) + '"' : '';
+    return '<pre><code' + attr + '>' + inner + '\n</code></pre>\n';
+  }
+
+  if (window.marked && typeof window.marked.use === 'function') {
+    window.marked.use({
+      walkTokens: tagCallout,
+      renderer: { blockquote: renderBlockquote, code: renderCode, image: renderImage },
+    });
+  }
+
+  function el(tag, options) {
+    const node = document.createElement(tag);
+    if (!options) return node;
+    if (options.class) node.className = options.class;
+    if (options.text != null) node.textContent = options.text;
+    if (options.children) {
+      for (const child of options.children) if (child) node.appendChild(child);
+    }
+    return node;
+  }
+
+  function isSameOriginAsset(url) {
+    try {
+      const parsed = new URL(url, window.location.href);
+      return parsed.origin === window.location.origin;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function hardenLinks(root) {
+    for (const a of root.querySelectorAll('a[href]')) {
+      const href = a.getAttribute('href') || '';
+      // Fragment links (wikilinks, in-note anchors) are same-page; forcing
+      // target=_blank on them would break in-app navigation.
+      if (href.startsWith('#')) continue;
+      a.setAttribute('target', '_blank');
+      a.setAttribute('rel', 'noopener noreferrer');
+    }
+  }
+
+  function stripRemoteAssets(root) {
+    for (const node of root.querySelectorAll('[src]')) {
+      const src = node.getAttribute('src') || '';
+      if (!src.trim() || !isSameOriginAsset(src)) node.removeAttribute('src');
+    }
+  }
+
+  function decorateRendered(root) {
+    const firstP = root.querySelector(':scope > p');
+    if (firstP && firstP.textContent.length > 60) firstP.classList.add('is-lede');
+
+    for (const bq of root.querySelectorAll('blockquote')) {
+      if (bq.classList.contains('callout')) continue;
+      const ps = bq.querySelectorAll('p');
+      if (ps.length === 1 && ps[0].textContent.length < 200) {
+        bq.classList.add('is-pullquote');
+      }
+    }
+  }
+
+  // Wikilinks: [[Title]] / [[Title|alias]]. Resolution is injected by app.js
+  // at boot so this module stays free of note-state knowledge. Rendered as
+  // fragment hrefs (#note:<id> / #new:<title>) which pass SAFE_URI_PATTERN —
+  // no data attributes, no sanitizer changes. app.js intercepts clicks.
+  let wikilinkResolver = null;
+
+  function setWikilinkResolver(fn) {
+    wikilinkResolver = typeof fn === 'function' ? fn : null;
+  }
+
+  let attachmentResolver = null;
+  function setAttachmentResolver(fn) {
+    attachmentResolver = typeof fn === 'function' ? fn : null;
+  }
+
+  const ATTACHMENT_PREFIX = 'attachment:';
+
+  // ![alt](attachment:<id>) resolves to an object URL when the id is loaded;
+  // otherwise, including in the share viewer, it becomes a visible placeholder.
+  function renderImage(token) {
+    const href = String(token.href || '');
+    if (!href.startsWith(ATTACHMENT_PREFIX)) return false;
+    const url = attachmentResolver ? attachmentResolver(href.slice(ATTACHMENT_PREFIX.length)) : null;
+    const alt = escapeHtml(token.text || '');
+    if (url) return '<img src="' + escapeHtml(url) + '" alt="' + alt + '">';
+    return '<span class="image-placeholder">(image not included' + (alt ? ': ' + alt : '') + ')</span>';
+  }
+
+  function escapeHtml(text) {
+    return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  const WIKILINK_TOKEN = /^\[\[([^\[\]\n|]+?)(?:\|([^\[\]\n]+?))?\]\]/;
+
+  if (window.marked && typeof window.marked.use === 'function') {
+    window.marked.use({
+      extensions: [
+        {
+          name: 'wikilink',
+          level: 'inline',
+          start(src) {
+            return src.indexOf('[[');
+          },
+          tokenizer(src) {
+            const match = WIKILINK_TOKEN.exec(src);
+            if (!match) return undefined;
+            return {
+              type: 'wikilink',
+              raw: match[0],
+              target: match[1].trim(),
+              alias: (match[2] || '').trim(),
+            };
+          },
+          renderer(token) {
+            const resolved = wikilinkResolver ? wikilinkResolver(token.target) : null;
+            const text = escapeHtml(token.alias || token.target);
+            if (resolved) {
+              return '<a class="wikilink" href="#note:' + encodeURIComponent(resolved) + '">' + text + '</a>';
+            }
+            return (
+              '<a class="wikilink is-phantom" href="#new:' + encodeURIComponent(token.target) + '">' + text + '</a>'
+            );
+          },
+        },
+      ],
+    });
+  }
+
+  // Highlights: ==text==, the Obsidian and iA Writer convention. Both inner
+  // ends must be a non-space, non-= character, so "a == b" never matches.
+  // Code spans and fences tokenize first, so == inside code stays literal.
+  // DOMPurify's HTML profile already allows <mark>.
+  const HIGHLIGHT_TOKEN = /^==(?=[^\s=])([\s\S]*?[^\s=])==(?!=)/;
+
+  if (window.marked && typeof window.marked.use === 'function') {
+    window.marked.use({
+      extensions: [
+        {
+          name: 'highlight',
+          level: 'inline',
+          start(src) {
+            return src.indexOf('==');
+          },
+          tokenizer(src) {
+            const match = HIGHLIGHT_TOKEN.exec(src);
+            if (!match) return undefined;
+            return { type: 'highlight', raw: match[0], tokens: this.lexer.inlineTokens(match[1]) };
+          },
+          renderer(token) {
+            return '<mark>' + this.parser.parseInline(token.tokens) + '</mark>';
+          },
+        },
+      ],
+    });
+  }
+
+  // Raw wikilink targets in document order, ignoring fenced code blocks.
+  // Used for backlink indexing and rename rewriting.
+  function extractWikilinkTargets(src) {
+    const targets = [];
+    const pattern = /\[\[([^\[\]\n|]+?)(?:\|[^\[\]\n]*?)?\]\]/g;
+    scanOutsideFences(src, (line) => {
+      let match;
+      while ((match = pattern.exec(line)) !== null) targets.push(match[1].trim());
+      pattern.lastIndex = 0;
+    });
+    return targets;
+  }
+
+  // Walks src line by line, invoking cb(line, offset) only for lines outside
+  // fenced code blocks. Fence state tracks the opening marker char so ``` and
+  // ~~~ cannot close each other.
+  function scanOutsideFences(src, cb) {
+    const lines = String(src || '').split('\n');
+    let offset = 0;
+    let fence = null;
+    for (const line of lines) {
+      const fenceMatch = line.match(/^\s*(```+|~~~+)/);
+      if (fenceMatch) {
+        if (!fence) fence = fenceMatch[1][0];
+        else if (fenceMatch[1][0] === fence) fence = null;
+      } else if (!fence) {
+        cb(line, offset);
+      }
+      offset += line.length + 1;
+    }
+  }
+
+  const TASK_MARKER_LINE = /^(?:\s*(?:>\s*)*)(?:[-*+]|\d+[.)])\s+\[( |x|X)\]\s/;
+
+  // Returns [{ offset, checked }] for every GFM task marker in document order.
+  // offset indexes the state character inside the brackets, so a toggle is a
+  // one-character replacement. Mirrors what marked renders closely enough that
+  // a count mismatch signals "do not toggle" (see syncTaskCheckboxes in app.js).
+  function findTaskMarkers(src) {
+    const markers = [];
+    scanOutsideFences(src, (line, offset) => {
+      const m = line.match(TASK_MARKER_LINE);
+      // m[0] ends with `[<state>]` plus one whitespace char, so the state
+      // character sits three characters back from the match end.
+      if (m) markers.push({ offset: offset + m[0].length - 3, checked: m[1] !== ' ' });
+    });
+    return markers;
+  }
+
+  function renderMarkdownInto(container, src) {
+    container.replaceChildren();
+    const raw = window.marked.parse(src || '');
+    const frag = window.DOMPurify.sanitize(raw, SANITIZE_CONFIG);
+    hardenLinks(frag);
+    stripRemoteAssets(frag);
+    for (const pre of frag.querySelectorAll('pre')) pre.classList.add('code-block');
+    container.appendChild(frag);
+    decorateRendered(container);
+  }
+
+  function renderEmptyBody(container) {
+    container.replaceChildren(
+      el('p', {
+        class: 'rendered-empty',
+        children: [
+          document.createTextNode('This note is empty. Press '),
+          el('em', { text: 'Edit' }),
+          document.createTextNode(' to start writing.'),
+        ],
+      }),
+    );
+  }
+
+  // Reading metrics for the document eyebrow and byline.
+  function wordCount(text) {
+    if (!text) return 0;
+    return text.trim().split(/\s+/).filter(Boolean).length;
+  }
+
+  function formatReadTime(words) {
+    const seconds = Math.ceil((words / 200) * 60);
+    if (seconds < 60) return seconds + 's';
+    return Math.ceil(seconds / 60) + 'm';
+  }
+
+  window.ScratchpadMarkdown = {
+    sanitizeConfig: SANITIZE_CONFIG,
+    wordCount,
+    formatReadTime,
+    renderMarkdownInto,
+    renderEmptyBody,
+    findTaskMarkers,
+    setWikilinkResolver,
+    setAttachmentResolver,
+    extractWikilinkTargets,
+    scanOutsideFences,
+  };
+})();

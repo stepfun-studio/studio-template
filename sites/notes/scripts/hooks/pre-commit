@@ -1,0 +1,84 @@
+#!/bin/sh
+# Pre-commit hook: block staged additions that write markup into the DOM as a
+# raw string -- innerHTML/outerHTML/srcdoc assignment (dot or bracket notation,
+# plain or compound, even when the value sits on the next line), plus the
+# parser entry points insertAdjacentHTML(), setHTMLUnsafe(),
+# document.write/writeln(), and createContextualFragment().
+#
+# Only ADDED lines (diff lines starting with "+") are checked, so pre-existing
+# code never blocks an unrelated commit. The diff is parsed in one pass, so a
+# filename with spaces or non-ASCII characters can never make a file drop out
+# of the scan; every stage fails closed.
+#
+# Sanctioned pattern instead (see CLAUDE.md "HTML/JS safety"):
+#   DOMPurify.sanitize(raw, { RETURN_DOM_FRAGMENT: true }) + replaceChildren()
+#
+# Activate with: git config core.hooksPath scripts/hooks
+
+set -eu
+
+# ([^=]|$) instead of a bare [^=]: the latter needs a character AFTER the '=',
+# so a formatter-wrapped `el.innerHTML =` at end of line slipped through.
+assign='(\+|\?\?|\|\||&&)?=([^=]|$)'
+pattern="\.(innerHTML|outerHTML)[[:space:]]*${assign}"
+pattern="${pattern}|\[[[:space:]]*[\"'](innerHTML|outerHTML)[\"'][[:space:]]*\][[:space:]]*${assign}"
+pattern="${pattern}|\.srcdoc[[:space:]]*${assign}"
+pattern="${pattern}|insertAdjacentHTML[[:space:]]*\("
+pattern="${pattern}|setHTMLUnsafe[[:space:]]*\("
+pattern="${pattern}|document\.write(ln)?[[:space:]]*\("
+pattern="${pattern}|createContextualFragment[[:space:]]*\("
+
+diff_tmp=$(mktemp)
+added_tmp=$(mktemp)
+trap 'rm -f "$diff_tmp" "$added_tmp"' EXIT
+
+if ! git diff --cached --unified=0 -- \
+  '*.js' '*.mjs' '*.cjs' '*.jsx' '*.ts' '*.tsx' '*.html' '*.svg' > "$diff_tmp"; then
+  echo "pre-commit: git diff failed; refusing to commit unchecked." >&2
+  exit 2
+fi
+
+# One pass over the whole diff: filenames come from the +++ headers, so the
+# shell never word-splits a path. Vendored and node_modules code is exempt.
+awk '
+  /^\+\+\+ / {
+    file = substr($0, 5)
+    sub(/^"/, "", file); sub(/"$/, "", file); sub(/\t$/, "", file)
+    sub(/^[abciw]\//, "", file)
+    skip = (file ~ /^public\/js\/vendor\// || file ~ /(^|\/)node_modules\//)
+    next
+  }
+  /^@@/ {
+    match($0, /\+[0-9]+/)
+    lineno = substr($0, RSTART + 1, RLENGTH - 1) + 0
+    next
+  }
+  /^\+/ {
+    if (!skip) print file ":" lineno ":" substr($0, 2)
+    lineno++
+    next
+  }
+' "$diff_tmp" > "$added_tmp"
+
+set +e
+hits=$(grep -E "$pattern" "$added_tmp")
+rc=$?
+set -e
+if [ "$rc" -gt 1 ]; then
+  echo "pre-commit: grep failed (status $rc); refusing to commit unchecked." >&2
+  exit 2
+fi
+
+if [ "$rc" -eq 0 ]; then
+  echo "pre-commit: staged changes write raw HTML into the DOM:"
+  echo
+  echo "$hits"
+  echo
+  echo "Use DOMPurify.sanitize(raw, { RETURN_DOM_FRAGMENT: true }) + replaceChildren() instead (CLAUDE.md: HTML/JS safety)."
+  exit 1
+fi
+
+npm run check:format
+npm run check:lint
+npm run check:types
+npm run check:structure

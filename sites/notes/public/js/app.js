@@ -1,0 +1,5959 @@
+/* Scratchpad app: state, rendering, events. Depends on marked, DOMPurify, ScratchpadDB. */
+(function () {
+  'use strict';
+
+  const DB = window.ScratchpadDB;
+  const Markdown = window.ScratchpadMarkdown;
+  const Search = window.ScratchpadSearch;
+  const SearchView = window.ScratchpadSearchView;
+  const Zip = window.ScratchpadZip;
+  const HomeDesk = window.ScratchpadHomeDesk;
+  const REVISION_LIMIT = 10;
+  const DRAFT_DEBOUNCE_MS = 350;
+  const IMPORT_MAX_FILE_BYTES = 2 * 1024 * 1024;
+  const IMPORT_MAX_NOTES = 1000;
+  const IMPORT_MAX_REVISIONS = 5000;
+  const NOTE_TITLE_MAX = 240;
+  const NOTE_BODY_MAX = 200000;
+  const NOTE_TAG_MAX = 48;
+  const NOTE_TAGS_MAX = 20;
+  const MAX_ROW_TAGS = 2; // chips per note-list row before the +n counter
+  const FOLDER_NAME_MAX = 60;
+  const FOLDERS_MAX = 100;
+  const IMPORT_MAX_FOLDERS = FOLDERS_MAX + 1;
+  const FOLDER_COLORS = new Set(['accent', 'olive', 'sky', 'gray']);
+  const RESERVED_FOLDER_NAME = 'notes';
+  const FOLDER_VIEW_KEY = 'scratchpad:folderView';
+  const DAILY_MONTH_DISCLOSURE_KEY = 'scratchpad:dailyMonthDisclosure';
+  const VIRTUAL_FOLDER_KEY = '__notes__';
+  const DAILY_NOTES_FOLDER_ID = 'scratchpad-daily-notes';
+  const DAILY_NOTES_FOLDER_NAME = 'Daily Notes';
+  const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+  const LAST_BACKUP_KEY = 'scratchpad:lastBackupAt';
+  const BACKUP_SNOOZE_KEY = 'scratchpad:backupReminderSnoozedUntil'; // legacy key, cleared on export
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const BACKUP_HEALTHY_MS = 7 * DAY_MS;
+  const BACKUP_AGING_MS = 30 * DAY_MS;
+  const CROSS_TAB_CHANNEL = 'scratchpad-notes';
+  const TAB_ID = uuidLike();
+
+  function uuidLike() {
+    return (crypto.randomUUID && crypto.randomUUID()) ||
+      'tab-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+  }
+
+  const state = {
+    notes: [],
+    folders: [],
+    selectedId: null,
+    editing: false,
+    dirty: false,
+    search: '',
+    tagFilter: null,
+    view: 'active',
+    folderViewId: readFolderView(),
+    folderSwitcherQuery: '',
+    mobileView: 'list', // 'list' | 'editor' - only meaningful on narrow viewports
+    focusMode: false, // distraction-free writing; runtime-only, never persisted or restored on reload
+    promptedDrafts: new Set(),
+    pendingTagDelete: null,
+    importPreview: null,
+    encryptedImport: null,
+    sharedNoteIds: new Set(),
+    backupPassphraseMode: null,
+    saveConflict: null,
+    externalChanges: new Set(),
+    serviceWorkerRegistration: null,
+    waitingWorker: null,
+    reloadForUpdate: false,
+    bulkMode: false,
+    bulkSelectedIds: new Set(),
+    folderDialogId: null,
+    folderMenuTargetId: null,
+    folderDeleteId: null,
+    moveTargetIds: null,
+    commandItems: [],
+    commandIndex: 0,
+    busy: new Set(),
+  };
+
+  // -------- Element refs --------
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    shell: $('app-shell'),
+    chronicleRail: $('chronicle-rail'),
+    chronicleMonth: $('chronicle-month'),
+    chronicleDays: $('chronicle-days'),
+    viewMenuBtn: $('view-menu-btn'),
+    viewMenu: $('view-menu'),
+    sidebar: $('sidebar'),
+    main: $('main'),
+    focusExitBtn: $('focus-exit-btn'),
+    focusModeBtn: $('focus-mode-btn'),
+    search: $('search'),
+    searchStatus: $('search-status'),
+    activeFilter: $('active-filter'),
+    activeFilterTag: $('active-filter-tag'),
+    clearFilter: $('clear-filter'),
+    activeNotesView: $('active-notes-view'),
+    archiveView: $('archive-view'),
+    trashView: $('trash-view'),
+    viewMenuLabel: $('view-menu-label'),
+    folderNavigation: $('folder-navigation'),
+    homeView: $('home-view'),
+    folderSwitcherBtn: $('folder-switcher-btn'),
+    folderSwitcherLabel: $('folder-switcher-label'),
+    folderSwitcher: $('folder-switcher'),
+    folderSwitcherSearch: $('folder-switcher-search'),
+    folderSwitcherList: $('folder-switcher-list'),
+    folderSwitcherNew: $('folder-switcher-new'),
+    manageTags: $('manage-tags'),
+    listHeader: $('list-header'),
+    listMenuBtn: $('list-menu-btn'),
+    listMenu: $('list-menu'),
+    newFolderMenuBtn: $('new-folder-menu-btn'),
+    newNote: $('new-note'),
+    todayNote: $('today-note'),
+    bulkToggle: $('bulk-toggle'),
+    commandPaletteBtn: $('command-palette-btn'),
+    emptyNewNote: $('empty-new-note'),
+    noteList: $('note-list'),
+    noteCount: $('note-count'),
+    noteCountNoun: $('note-count-noun'),
+    backToList: $('back-to-list'),
+    breadcrumb: $('note-breadcrumb'),
+    titleDisplay: $('note-title-display'),
+    titleInput: $('note-title-input'),
+    noteEyebrow: $('note-eyebrow'),
+    noteByline: $('note-byline'),
+    editorDateSpine: $('editor-date-spine'),
+    editorDateNumber: $('editor-date-number'),
+    editorDateDay: $('editor-date-day'),
+    editorDocHead: $('editor-doc-head'),
+    editorCard: document.querySelector('.editor-card'),
+    pinToggle: $('pin-toggle'),
+    editBtn: $('edit-btn'),
+    saveBtn: $('save-btn'),
+    historyBtn: $('history-btn'),
+    archiveNoteBtn: $('archive-note-btn'),
+    unarchiveNoteBtn: $('unarchive-note-btn'),
+    restoreBtn: $('restore-btn'),
+    permanentDeleteBtn: $('permanent-delete-btn'),
+    deleteBtn: $('delete-btn'),
+    overflowBtn: $('overflow-btn'),
+    overflowMenu: $('overflow-menu'),
+    exportOverflowBtn: $('export-overflow-btn'),
+    printOverflowBtn: $('print-overflow-btn'),
+    discardOverflowBtn: $('discard-overflow-btn'),
+    dirtyIndicator: $('dirty-indicator'),
+    tagBar: $('tag-bar'),
+    tagPills: $('tag-pills'),
+    tagInput: $('tag-input'),
+    tagAddEmpty: $('tag-add-empty'),
+    tagAddPlus: $('tag-add-plus'),
+    rendered: $('note-rendered'),
+    backlinksSection: $('backlinks-section'),
+    backlinksSummary: $('backlinks-summary'),
+    backlinksList: $('backlinks-list'),
+    editor: $('note-editor'),
+    wikilinkSuggest: $('wikilink-suggest'),
+    formatToolbar: $('editor-format'),
+    editorEmptyState: $('editor-empty-state'),
+    editorView: $('editor-view'),
+    emptyNoNotesTitle: $('empty-no-notes-title'),
+    emptyNoNotesCopy: $('empty-no-notes-copy'),
+    emptyViewArchive: $('empty-view-archive'),
+    clearSearchBtn: $('clear-search-btn'),
+    emptyImportNotes: $('empty-import-notes'),
+    folderMenu: $('folder-menu'),
+    folderDialog: $('folder-dialog'),
+    folderDialogTitle: $('folder-dialog-title'),
+    folderNameInput: $('folder-name-input'),
+    folderNameError: $('folder-name-error'),
+    folderDialogSave: $('folder-dialog-save'),
+    folderDeleteDialog: $('folder-delete-dialog'),
+    folderDeleteCopy: $('folder-delete-copy'),
+    folderDeleteKeep: $('folder-delete-keep'),
+    folderDeleteTrash: $('folder-delete-trash'),
+    moveNoteDialog: $('move-note-dialog'),
+    moveFolderList: $('move-folder-list'),
+    moveNoteOverflow: $('move-note-overflow'),
+    duplicateOverflowBtn: $('duplicate-overflow-btn'),
+    deleteDialog: $('delete-dialog'),
+    confirmDelete: $('confirm-delete'),
+    permanentDeleteDialog: $('permanent-delete-dialog'),
+    confirmPermanentDelete: $('confirm-permanent-delete'),
+    permanentDeleteTitle: $('permanent-delete-dialog-title'),
+    permanentDeleteCopy: $('permanent-delete-copy'),
+    emptyTrashDialog: $('empty-trash-dialog'),
+    confirmEmptyTrash: $('confirm-empty-trash'),
+    discardDialog: $('discard-dialog'),
+    confirmDiscard: $('confirm-discard'),
+    draftDialog: $('draft-dialog'),
+    draftDialogCopy: $('draft-dialog-copy'),
+    restoreDraft: $('restore-draft'),
+    discardDraft: $('discard-draft'),
+    historyDialog: $('history-dialog'),
+    historyList: $('history-list'),
+    aboutDialog: $('about-dialog'),
+    openAbout: $('open-about'),
+    openSettings: $('open-settings'),
+    settingsDialog: $('settings-dialog'),
+    exportBtn: $('export-btn'),
+    exportEncryptedBtn: $('export-encrypted-btn'),
+    exportMarkdownBtn: $('export-markdown-btn'),
+    importBtn: $('import-btn'),
+    importFile: $('import-file'),
+    backupChip: $('backup-chip'),
+    backupChipLabel: $('backup-chip-label'),
+    backupMenu: $('backup-menu'),
+    backupMenuMeta: $('backup-menu-meta'),
+    diagnosticActiveNotes: $('diagnostic-active-notes'),
+    diagnosticArchivedNotes: $('diagnostic-archived-notes'),
+    diagnosticTrashedNotes: $('diagnostic-trashed-notes'),
+    diagnosticRevisions: $('diagnostic-revisions'),
+    diagnosticDrafts: $('diagnostic-drafts'),
+    diagnosticStorage: $('diagnostic-storage'),
+    diagnosticStorageProtection: $('diagnostic-storage-protection'),
+    diagnosticLastBackup: $('diagnostic-last-backup'),
+    diagnosticOfflineCache: $('diagnostic-offline-cache'),
+    protectStorageBtn: $('protect-storage-btn'),
+    checkUpdatesBtn: $('check-updates-btn'),
+    refreshOfflineCopyBtn: $('refresh-offline-copy-btn'),
+    backupPassphraseDialog: $('backup-passphrase-dialog'),
+    backupPassphraseTitle: $('backup-passphrase-title'),
+    backupPassphraseCopy: $('backup-passphrase-copy'),
+    backupPassphrase: $('backup-passphrase'),
+    backupPassphraseConfirmWrap: $('backup-passphrase-confirm-wrap'),
+    backupPassphraseConfirm: $('backup-passphrase-confirm'),
+    backupPassphraseShow: $('backup-passphrase-show'),
+    backupPassphraseError: $('backup-passphrase-error'),
+    confirmEncryptedExport: $('confirm-encrypted-export'),
+    confirmEncryptedImport: $('confirm-encrypted-import'),
+    saveConflictDialog: $('save-conflict-dialog'),
+    saveConflictCopy: $('save-conflict-copy'),
+    conflictUseSaved: $('conflict-use-saved'),
+    conflictSaveCopy: $('conflict-save-copy'),
+    conflictKeepMine: $('conflict-keep-mine'),
+    eraseLocalDataBtn: $('erase-local-data-btn'),
+    eraseLocalDataDialog: $('erase-local-data-dialog'),
+    eraseConfirmation: $('erase-confirmation'),
+    confirmEraseLocalData: $('confirm-erase-local-data'),
+    eraseSharesDialog: $('erase-shares-dialog'),
+    eraseSharesCopy: $('erase-shares-copy'),
+    confirmEraseAnyway: $('confirm-erase-anyway'),
+    pwaUpdateNotice: $('pwa-update-notice'),
+    pwaUpdateLater: $('pwa-update-later'),
+    pwaUpdateReload: $('pwa-update-reload'),
+    importPreviewDialog: $('import-preview-dialog'),
+    importPreviewCounts: $('import-preview-counts'),
+    importPreviewErrors: $('import-preview-errors'),
+    confirmImport: $('confirm-import'),
+    tagManagerDialog: $('tag-manager-dialog'),
+    tagManagerList: $('tag-manager-list'),
+    tagDeleteDialog: $('tag-delete-dialog'),
+    tagDeleteCopy: $('tag-delete-copy'),
+    confirmTagDelete: $('confirm-tag-delete'),
+    commandPaletteDialog: $('command-palette-dialog'),
+    commandPaletteInput: $('command-palette-input'),
+    commandPaletteList: $('command-palette-list'),
+    commandPaletteEmpty: $('command-palette-empty'),
+    commandPaletteStatus: $('command-palette-status'),
+    bulkTagDialog: $('bulk-tag-dialog'),
+    bulkTagInput: $('bulk-tag-input'),
+    bulkApplyTag: $('bulk-apply-tag'),
+    pinTemplate: $('tpl-pin-icon'),
+    linkRenameDialog: $('link-rename-dialog'),
+    linkRenameCopy: $('link-rename-copy'),
+    confirmLinkRename: $('confirm-link-rename'),
+    quickCaptureDialog: $('quick-capture-dialog'),
+    quickCaptureInput: $('quick-capture-input'),
+    quickCaptureSubmit: $('quick-capture-submit'),
+    quickCapturePreview: $('quick-capture-preview'),
+    quickCaptureDestination: $('quick-capture-destination'),
+    shareBtn: $('share-btn'),
+    shareDialog: $('share-dialog'),
+    shareCopy: $('share-copy'),
+    shareEmail: $('share-email'),
+    shareStatus: $('share-status'),
+    shareMailtoWarning: $('share-mailto-warning'),
+    shareExplainer: $('share-explainer'),
+    shareLinkList: $('share-link-list'),
+    shareExpiryDays: $('share-expiry-days'),
+    createShareLink: $('create-share-link'),
+    shareLinkError: $('share-link-error'),
+    shareTemplate: $('tpl-share-icon'),
+    toastRegion: $('toast-region'),
+  };
+
+  // Narrow-screen pane switching lives in public/js/mobile-view.js.
+  const MobileView = window.ScratchpadMobileView;
+  const isNarrow = () => MobileView.isNarrow();
+  const syncMobileView = () => MobileView.sync(els.shell, state);
+  const focusMobilePane = () => MobileView.focusPane(els, state);
+
+  // mailto: URLs above ~2000 chars get truncated by many mail clients;
+  // measure the encoded body since newlines and punctuation balloon when
+  // percent-encoded.
+  const MAILTO_ENCODED_LIMIT = 1800;
+
+  // -------- Utilities --------
+  const uuid = () =>
+    (crypto.randomUUID && crypto.randomUUID()) ||
+    'n-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+
+  const now = () => Date.now();
+
+  let crossTabChannel = null;
+
+  function nextUpdatedAt(note) {
+    return Math.max(now(), (Number(note && note.updatedAt) || 0) + 1);
+  }
+
+  function broadcastChange(message) {
+    if (!crossTabChannel) return;
+    try {
+      crossTabChannel.postMessage({ ...message, source: TAB_ID });
+    } catch (e) {
+      console.warn('Cross-tab notification failed', e);
+    }
+  }
+
+  async function putNoteRecord(note, changeType) {
+    await DB.put(note);
+    if (window.ScratchpadLinkedFolder) window.ScratchpadLinkedFolder.noteChanged(note);
+    broadcastChange({ type: changeType || 'note-changed', noteId: note.id, updatedAt: note.updatedAt });
+  }
+
+  async function bulkPutNoteRecords(notes, changeType) {
+    await DB.bulkPut(notes);
+    for (const note of notes) broadcastChange({ type: changeType || 'note-changed', noteId: note.id, updatedAt: note.updatedAt });
+    if (window.ScratchpadLinkedFolder) for (const note of notes) window.ScratchpadLinkedFolder.noteChanged(note);
+  }
+
+  async function deleteNoteRecord(noteId) {
+    await DB.deleteNoteEverywhere(noteId);
+    broadcastChange({ type: 'note-deleted', noteId });
+  }
+
+  async function refreshNoteFromDatabase(noteId, deleted) {
+    const index = state.notes.findIndex((note) => note.id === noteId);
+    if (deleted) {
+      if (index >= 0) state.notes.splice(index, 1);
+      if (state.selectedId === noteId) {
+        state.selectedId = null;
+        state.editing = false;
+        state.dirty = false;
+      }
+      renderAll();
+      return;
+    }
+    const stored = await DB.get(noteId);
+    if (!stored) return;
+    const note = normalizeNote(stored);
+    if (index >= 0) state.notes[index] = note;
+    else state.notes.push(note);
+    renderAll();
+  }
+
+  async function refreshNoteFolderFromDatabase(noteId) {
+    const note = getNote(noteId);
+    if (!note) return;
+    const stored = await DB.get(noteId);
+    if (!stored) return;
+    note.folderId = normalizeNote(stored).folderId;
+    renderAll();
+  }
+
+  async function refreshNoteLifecycleFromDatabase(noteId) {
+    const note = getNote(noteId);
+    if (!note) return;
+    const stored = await DB.get(noteId);
+    if (!stored) return;
+    const normalized = normalizeNote(stored);
+    note.archivedAt = normalized.archivedAt;
+    if (state.selectedId === noteId) state.view = noteLifecycleView(note);
+    renderAll();
+    toast(isArchived(note) ? 'Note archived in another tab.' : 'Note unarchived in another tab.', {
+      tone: 'info',
+    });
+  }
+
+  function initCrossTabSync() {
+    if (typeof BroadcastChannel !== 'function') return;
+    crossTabChannel = new BroadcastChannel(CROSS_TAB_CHANNEL);
+    crossTabChannel.addEventListener('message', (event) => {
+      const message = event.data || {};
+      if (message.source === TAB_ID) return;
+      if (message.type === 'reset') {
+        state.notes = [];
+        state.selectedId = null;
+        state.editing = false;
+        state.dirty = false;
+        state.externalChanges.clear();
+        renderAll();
+        toast('Local data was erased in another tab.', { tone: 'info' });
+        return;
+      }
+      if (message.type === 'folders-changed') {
+        loadFolders().then(renderAll).catch((e) => console.warn('Cross-tab folder refresh failed', e));
+        return;
+      }
+      if (!message.noteId) return;
+      if (message.type === 'note-folder-changed') {
+        refreshNoteFolderFromDatabase(message.noteId).catch((e) => {
+          console.warn('Cross-tab folder membership refresh failed', e);
+        });
+        return;
+      }
+      if (message.type === 'note-lifecycle-changed') {
+        refreshNoteLifecycleFromDatabase(message.noteId).catch((e) => {
+          console.warn('Cross-tab lifecycle refresh failed', e);
+        });
+        return;
+      }
+      if (state.selectedId === message.noteId && state.editing && state.dirty) {
+        state.externalChanges.add(message.noteId);
+        return;
+      }
+      refreshNoteFromDatabase(message.noteId, message.type === 'note-deleted').catch((e) => {
+        console.warn('Cross-tab refresh failed', e);
+      });
+    });
+  }
+
+  function debounce(fn, ms) {
+    let t = null;
+    return function (...args) {
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), ms);
+    };
+  }
+
+  function el(tag, options) {
+    const node = document.createElement(tag);
+    if (!options) return node;
+    if (options.class) node.className = options.class;
+    if (options.text != null) node.textContent = options.text;
+    if (options.attrs) {
+      for (const [k, v] of Object.entries(options.attrs)) {
+        if (v === false || v == null) continue;
+        node.setAttribute(k, v === true ? '' : v);
+      }
+    }
+    if (options.on) {
+      for (const [evt, handler] of Object.entries(options.on)) node.addEventListener(evt, handler);
+    }
+    if (options.children) {
+      for (const child of options.children) if (child) node.appendChild(child);
+    }
+    return node;
+  }
+
+  function clonePinIcon() {
+    return els.pinTemplate.content.cloneNode(true);
+  }
+
+  function cloneShareIcon() {
+    return els.shareTemplate.content.cloneNode(true);
+  }
+
+  // Transient action feedback. toast.js owns the contract and the clock.
+  function toast(message, opts) {
+    return window.ScratchpadToast.show(els.toastRegion, message, opts);
+  }
+
+  function setControlsBusy(controls, busy) {
+    for (const control of controls || []) {
+      if (!control) continue;
+      control.disabled = busy;
+      if (busy) control.setAttribute('aria-busy', 'true');
+      else control.removeAttribute('aria-busy');
+    }
+  }
+
+  async function withBusy(key, controls, errorMessage, work) {
+    if (state.busy.has(key)) return undefined;
+    state.busy.add(key);
+    setControlsBusy(controls, true);
+    try {
+      return await work();
+    } catch (e) {
+      console.error(errorMessage, e);
+      toast(errorMessage, { tone: 'error', persist: true });
+      return undefined;
+    } finally {
+      setControlsBusy(controls, false);
+      state.busy.delete(key);
+    }
+  }
+
+  function deriveTitle(note) {
+    if (note.title && note.title.trim()) return note.title.trim();
+    const body = (note.body || '').trim();
+    if (!body) return 'Untitled note';
+    const lines = body.split(/\r?\n/);
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) continue;
+      const heading = line.match(/^#{1,6}\s+(.*)$/);
+      return heading ? heading[1].trim() : line;
+    }
+    return 'Untitled note';
+  }
+
+  function formatTimestamp(ms) {
+    const d = new Date(ms || now());
+    const today = new Date();
+    const sameDay =
+      d.getFullYear() === today.getFullYear() &&
+      d.getMonth() === today.getMonth() &&
+      d.getDate() === today.getDate();
+    if (sameDay) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const sameYear = d.getFullYear() === today.getFullYear();
+    return d.toLocaleDateString([], sameYear ? { month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+
+  function formatFullTimestamp(ms) {
+    return new Date(ms || now()).toLocaleString([], {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  }
+
+  // Sidebar row date format: today → "2:08p", yesterday → "Yest",
+  // last 7 days → "Thu", this year → "May 15", older → "May '24".
+  function formatRelativeDay(ms) {
+    const d = new Date(ms || now());
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+    const weekStart = todayStart - 7 * 24 * 60 * 60 * 1000;
+
+    if (ms >= todayStart) {
+      let hour = d.getHours();
+      const period = hour >= 12 ? 'p' : 'a';
+      if (hour === 0) hour = 12;
+      else if (hour > 12) hour -= 12;
+      return hour + ':' + String(d.getMinutes()).padStart(2, '0') + period;
+    }
+    if (ms >= yesterdayStart) return 'Yest';
+    if (ms >= weekStart) {
+      return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
+    }
+    if (d.getFullYear() === today.getFullYear()) {
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+    return d.toLocaleDateString([], { month: 'short' }) + " '" + String(d.getFullYear()).slice(-2);
+  }
+
+  function lifecycleTime(note) {
+    if (isTrashed(note)) return note.deletedAt;
+    if (isArchived(note)) return note.archivedAt;
+    return note.updatedAt;
+  }
+
+  function lifecycleTimeLabel(note) {
+    const relative = formatRelativeDay(lifecycleTime(note));
+    return isArchived(note) ? 'Archived ' + relative : relative;
+  }
+
+  // Buckets current-view notes for the sidebar. Pins lead only in Active;
+  // Archive is grouped by the moment a note entered Archive.
+  function bucketizeNotes(notes) {
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+    const weekStart = todayStart - 7 * 24 * 60 * 60 * 1000;
+
+    const pinned = [];
+    const todayBucket = [];
+    const yesterdayBucket = [];
+    const thisWeek = [];
+    const earlier = [];
+
+    for (const note of notes) {
+      if (note.pinned && !isTrashed(note) && !isArchived(note)) {
+        pinned.push(note);
+        continue;
+      }
+      const ts = lifecycleTime(note);
+      if (ts >= todayStart) todayBucket.push(note);
+      else if (ts >= yesterdayStart) yesterdayBucket.push(note);
+      else if (ts >= weekStart) thisWeek.push(note);
+      else earlier.push(note);
+    }
+    return [
+      { label: 'Pinned', notes: pinned, isPinnedSection: true },
+      { label: 'Today', notes: todayBucket },
+      { label: 'Yesterday', notes: yesterdayBucket },
+      { label: 'This week', notes: thisWeek },
+      { label: 'Earlier', notes: earlier },
+    ];
+  }
+
+  function truncate(text, n) {
+    if (!text) return '';
+    text = text.replace(/\s+/g, ' ').trim();
+    return text.length > n ? text.slice(0, n - 1) + '…' : text;
+  }
+
+  function noteExcerpt(note) {
+    const title = deriveTitle(note).toLowerCase();
+    const lines = (note.body || '').split(/\r?\n/);
+    for (const raw of lines) {
+      let line = raw.trim();
+      if (!line) continue;
+      line = line
+        .replace(/^#{1,6}\s+/, '')
+        .replace(/^>\s?/, '')
+        .replace(/^[-*+]\s+/, '')
+        .replace(/^\d+\.\s+/, '')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/[*_~#]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!line || line.toLowerCase() === title) continue;
+      return truncate(line, 112);
+    }
+    return '';
+  }
+
+  function highlightedChildren(text, terms) {
+    if (!state.search.trim()) return [document.createTextNode(text || '')];
+    return SearchView.highlightText(text || '', terms || Search.parseQuery(state.search).text);
+  }
+
+  function normalizeTag(t) {
+    return (t || '').toLowerCase().trim().replace(/\s+/g, '-');
+  }
+
+  function finiteTime(value, fallback) {
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  function normalizeNote(n) {
+    const t = now();
+    return {
+      id: typeof n.id === 'string' && n.id ? n.id : uuid(),
+      title: typeof n.title === 'string' ? n.title : '',
+      body: typeof n.body === 'string' ? n.body : '',
+      tags: Array.isArray(n.tags) ? Array.from(new Set(n.tags.map(normalizeTag).filter(Boolean))) : [],
+      pinned: !!n.pinned,
+      folderId: typeof n.folderId === 'string' && n.folderId ? n.folderId : null,
+      createdAt: finiteTime(n.createdAt, t),
+      updatedAt: finiteTime(n.updatedAt, t),
+      archivedAt: Number.isFinite(n.archivedAt) ? n.archivedAt : null,
+      deletedAt: Number.isFinite(n.deletedAt) ? n.deletedAt : null,
+      lastDraftAt: Number.isFinite(n.lastDraftAt) ? n.lastDraftAt : null,
+      dailyDate: typeof n.dailyDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(n.dailyDate) ? n.dailyDate : null,
+      monthlyReviewMonth: typeof n.monthlyReviewMonth === 'string' && /^\d{4}-\d{2}$/.test(n.monthlyReviewMonth)
+        ? n.monthlyReviewMonth
+        : null,
+    };
+  }
+
+  function normalizeRevision(rev, noteId) {
+    if (!rev || typeof rev !== 'object') return null;
+    const t = now();
+    return {
+      id: typeof rev.id === 'string' && rev.id ? rev.id : uuid(),
+      noteId: noteId || rev.noteId,
+      title: typeof rev.title === 'string' ? rev.title : '',
+      body: typeof rev.body === 'string' ? rev.body : '',
+      tags: Array.isArray(rev.tags) ? Array.from(new Set(rev.tags.map(normalizeTag).filter(Boolean))) : [],
+      pinned: !!rev.pinned,
+      createdAt: finiteTime(rev.createdAt, t),
+      updatedAt: finiteTime(rev.updatedAt, t),
+      savedAt: finiteTime(rev.savedAt, finiteTime(rev.updatedAt, t)),
+      deletedAt: Number.isFinite(rev.deletedAt) ? rev.deletedAt : null,
+    };
+  }
+
+  function getNote(id) {
+    return state.notes.find((n) => n.id === id) || null;
+  }
+
+  // -------- Folders --------
+  function normalizeFolderName(name) {
+    return String(name || '').replace(/\s+/g, ' ').trim().slice(0, FOLDER_NAME_MAX);
+  }
+
+  function normalizeFolder(f, index) {
+    if (!f || typeof f !== 'object') return null;
+    const t = now();
+    const name = normalizeFolderName(f.name);
+    if (!name || name.toLowerCase() === RESERVED_FOLDER_NAME) return null;
+    return {
+      id: typeof f.id === 'string' && f.id ? f.id : uuid(),
+      name,
+      color: FOLDER_COLORS.has(f.color) ? f.color : null,
+      sortOrder: Number.isFinite(f.sortOrder) ? f.sortOrder : (index || 0),
+      parentId: null,
+      createdAt: finiteTime(f.createdAt, t),
+      updatedAt: finiteTime(f.updatedAt, t),
+    };
+  }
+
+  function sortedFolders() {
+    return [...state.folders].sort((a, b) => (a.sortOrder - b.sortOrder) || (a.createdAt - b.createdAt));
+  }
+
+  function folderById(id) {
+    return state.folders.find((f) => f.id === id) || null;
+  }
+
+  function isDailyNote(note) {
+    return !!(note && note.dailyDate);
+  }
+
+  function isDailyNotesFolder(folderOrId) {
+    const id = typeof folderOrId === 'string' ? folderOrId : folderOrId && folderOrId.id;
+    return id === DAILY_NOTES_FOLDER_ID;
+  }
+
+  function userFolderCount(folders) {
+    return (folders || state.folders).filter((folder) => !isDailyNotesFolder(folder)).length;
+  }
+
+  // Orphaned folderIds (deleted folder, corrupt import) heal to the virtual
+  // "Notes" folder here rather than via a data migration.
+  function noteFolderId(note) {
+    return note && note.folderId && folderById(note.folderId) ? note.folderId : null;
+  }
+
+  function folderDisplayName(folderId) {
+    const folder = folderId ? folderById(folderId) : null;
+    return folder ? folder.name : 'Notes';
+  }
+
+  async function loadFolders() {
+    const rows = await DB.getAllFolders();
+    state.folders = rows.map((f, i) => normalizeFolder(f, i)).filter(Boolean);
+  }
+
+  // Daily Notes is a managed destination backed by the ordinary folders
+  // store. This reconciliation is intentionally idempotent: it can finish an
+  // interrupted adoption, heal imports, and run on every load without changing
+  // note recency or revision history.
+  async function ensureDailyNotesFolder() {
+    let managed = folderById(DAILY_NOTES_FOLDER_ID);
+    const legacyFolders = state.folders.filter((folder) =>
+      !isDailyNotesFolder(folder) &&
+      folder.name.toLowerCase() === DAILY_NOTES_FOLDER_NAME.toLowerCase()
+    );
+    let foldersChanged = false;
+
+    if (!managed) {
+      const legacy = legacyFolders[0] || null;
+      const ordered = sortedFolders();
+      const firstSortOrder = ordered.length
+        ? Math.min(...ordered.map((folder) => folder.sortOrder)) - 1
+        : 0;
+      const t = now();
+      managed = normalizeFolder({
+        id: DAILY_NOTES_FOLDER_ID,
+        name: DAILY_NOTES_FOLDER_NAME,
+        color: legacy ? legacy.color : null,
+        sortOrder: legacy ? legacy.sortOrder : firstSortOrder,
+        parentId: null,
+        createdAt: legacy ? legacy.createdAt : t,
+        updatedAt: legacy ? legacy.updatedAt : t,
+      }, 0);
+      await DB.putFolder(managed);
+      foldersChanged = true;
+    } else if (managed.name !== DAILY_NOTES_FOLDER_NAME) {
+      managed = { ...managed, name: DAILY_NOTES_FOLDER_NAME, updatedAt: now() };
+      await DB.putFolder(managed);
+      foldersChanged = true;
+    }
+
+    const legacyIds = new Set(legacyFolders.map((folder) => folder.id));
+    const changedNotes = state.notes
+      .filter((note) =>
+        (isDailyNote(note) && note.folderId !== DAILY_NOTES_FOLDER_ID) ||
+        legacyIds.has(note.folderId)
+      )
+      .map((note) => ({ ...note, folderId: DAILY_NOTES_FOLDER_ID }));
+
+    if (changedNotes.length) {
+      await bulkPutNoteRecords(changedNotes, 'note-folder-changed');
+      const nextById = new Map(changedNotes.map((note) => [note.id, note]));
+      for (const note of state.notes) {
+        const nextNote = nextById.get(note.id);
+        if (nextNote) Object.assign(note, nextNote);
+      }
+    }
+
+    if (legacyFolders.length) {
+      for (const folder of legacyFolders) await DB.removeFolder(folder.id);
+      foldersChanged = true;
+    }
+
+    state.folders = state.folders
+      .filter((folder) => !legacyIds.has(folder.id))
+      .map((folder) => isDailyNotesFolder(folder) ? managed : folder);
+    if (!state.folders.some(isDailyNotesFolder)) state.folders.push(managed);
+
+    if (foldersChanged) broadcastChange({ type: 'folders-changed' });
+    return managed;
+  }
+
+  function readFolderView() {
+    try {
+      const id = localStorage.getItem(FOLDER_VIEW_KEY);
+      return typeof id === 'string' && id ? id : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeFolderView(folderId) {
+    try {
+      if (folderId) localStorage.setItem(FOLDER_VIEW_KEY, folderId);
+      else localStorage.removeItem(FOLDER_VIEW_KEY);
+    } catch (e) { /* private mode / quota */ }
+  }
+
+  function isValidFolderView(folderId) {
+    return folderId === VIRTUAL_FOLDER_KEY || !!folderById(folderId);
+  }
+
+  function normalizeFolderView() {
+    if (state.folderViewId && !isValidFolderView(state.folderViewId)) {
+      state.folderViewId = null;
+      writeFolderView(null);
+    }
+  }
+
+  function setFolderView(folderId, render) {
+    const nextId = folderId && isValidFolderView(folderId) ? folderId : null;
+    state.folderViewId = nextId;
+    writeFolderView(nextId);
+    closeFolderSwitcher();
+    if (render !== false) renderAll();
+  }
+
+  function folderForView(folderId) {
+    if (folderId === VIRTUAL_FOLDER_KEY) return null;
+    return folderById(folderId);
+  }
+
+  function folderViewName() {
+    if (!state.folderViewId) return 'Folders';
+    const folder = folderForView(state.folderViewId);
+    return folder ? folder.name : 'Notes';
+  }
+
+  function currentNewNoteFolderId() {
+    const folder = folderForView(state.folderViewId);
+    return folder && !isDailyNotesFolder(folder) ? folder.id : null;
+  }
+
+  function dailyMonthDisclosure() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(DAILY_MONTH_DISCLOSURE_KEY) || '{}');
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+      return Object.fromEntries(
+        Object.entries(raw).filter(([key, value]) => typeof key === 'string' && typeof value === 'boolean')
+      );
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function dailyMonthDisclosureId(monthKey) {
+    return state.view + ':' + monthKey;
+  }
+
+  function isDailyMonthExpanded(monthKey) {
+    const disclosure = dailyMonthDisclosure();
+    const id = dailyMonthDisclosureId(monthKey);
+    return typeof disclosure[id] === 'boolean'
+      ? disclosure[id]
+      : monthKey === 'undated' || monthKey === todayKey().slice(0, 7);
+  }
+
+  function setDailyMonthExpanded(monthKey, expanded) {
+    const disclosure = dailyMonthDisclosure();
+    disclosure[dailyMonthDisclosureId(monthKey)] = !!expanded;
+    const entries = Object.entries(disclosure).slice(-120);
+    try {
+      localStorage.setItem(DAILY_MONTH_DISCLOSURE_KEY, JSON.stringify(Object.fromEntries(entries)));
+    } catch (e) { /* private mode / quota */ }
+    renderSidebar();
+  }
+
+  function folderNameError(name, excludeId) {
+    if (!name) return 'Folder name is required.';
+    if (name.toLowerCase() === RESERVED_FOLDER_NAME) return '"Notes" is reserved for the built-in folder.';
+    if (name.toLowerCase() === DAILY_NOTES_FOLDER_NAME.toLowerCase() && excludeId !== DAILY_NOTES_FOLDER_ID) {
+      return '"Daily Notes" is reserved for daily notes.';
+    }
+    const clash = state.folders.some((f) => f.id !== excludeId && f.name.toLowerCase() === name.toLowerCase());
+    if (clash) return 'A folder with that name already exists.';
+    if (!excludeId && userFolderCount() >= FOLDERS_MAX) return 'Folder limit reached (100).';
+    return null;
+  }
+
+  function newFolder(name, color) {
+    const t = now();
+    return normalizeFolder({ name, color, sortOrder: state.folders.length, createdAt: t, updatedAt: t }, state.folders.length);
+  }
+
+  // Persists a folder, tells other tabs, and reloads the list. Returns the folder.
+  async function saveFolder(folder) {
+    await DB.putFolder(folder);
+    broadcastChange({ type: 'folders-changed' });
+    await loadFolders();
+    return folder;
+  }
+
+  // Creates a folder for a feature module. Validates the name the way the
+  // dialog does; on failure it toasts the reason and returns null.
+  async function createFolder(name) {
+    const clean = normalizeFolderName(name);
+    const error = folderNameError(clean);
+    if (error) {
+      toast(error);
+      return null;
+    }
+    return saveFolder(newFolder(clean, null));
+  }
+
+  function openFolderDialog(folderId) {
+    if (isDailyNotesFolder(folderId)) return;
+    state.folderDialogId = folderId || null;
+    const folder = folderId ? folderById(folderId) : null;
+    els.folderDialogTitle.textContent = folder ? 'Edit folder' : 'New folder';
+    els.folderNameInput.value = folder ? folder.name : '';
+    els.folderNameInput.removeAttribute('aria-invalid');
+    els.folderNameError.hidden = true;
+    els.folderNameError.textContent = '';
+    const color = folder && folder.color ? folder.color : '';
+    const radio = document.querySelector('input[name="folder-color"][value="' + color + '"]');
+    if (radio) radio.checked = true;
+    openDialog(els.folderDialog);
+    els.folderNameInput.focus();
+  }
+
+  async function saveFolderDialog() {
+    if (isDailyNotesFolder(state.folderDialogId)) return;
+    const name = normalizeFolderName(els.folderNameInput.value);
+    const error = folderNameError(name, state.folderDialogId);
+    if (error) {
+      els.folderNameError.textContent = error;
+      els.folderNameError.hidden = false;
+      els.folderNameInput.setAttribute('aria-invalid', 'true');
+      els.folderNameInput.focus();
+      return;
+    }
+    const selected = document.querySelector('input[name="folder-color"]:checked');
+    const color = selected && FOLDER_COLORS.has(selected.value) ? selected.value : null;
+    const existing = state.folderDialogId ? folderById(state.folderDialogId) : null;
+    const folder = await saveFolder(existing ? { ...existing, name, color, updatedAt: now() } : newFolder(name, color));
+    state.folderDialogId = null;
+    closeDialog(els.folderDialog);
+    if (!existing) {
+      state.folderViewId = folder.id;
+      writeFolderView(folder.id);
+    }
+    renderAll();
+    toast(existing ? 'Folder updated.' : 'Folder created.');
+  }
+
+  // -------- Shared action-menu controller --------
+  function menuItems(menu) {
+    return Array.from(menu.querySelectorAll('[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]'))
+      .filter((item) => !item.hidden && item.offsetParent !== null);
+  }
+
+  function focusMenuItem(controller, index) {
+    const items = menuItems(controller.menu);
+    if (!items.length) return;
+    const i = (index + items.length) % items.length;
+    items[i].focus();
+  }
+
+  function openControlledMenu(controller, options) {
+    if (!controller.menu.hidden) return;
+    controller.trigger = options && options.trigger ? options.trigger : controller.defaultTrigger;
+    controller.menu.hidden = false;
+    controller.trigger.setAttribute('aria-expanded', 'true');
+    if (controller.onOpen) controller.onOpen();
+    document.addEventListener('click', controller.onOutsideClick, true);
+    document.addEventListener('keydown', controller.onKeyDown, true);
+    if (!options || options.focus !== false) {
+      setTimeout(() => {
+        if (!controller.menu.hidden) focusMenuItem(controller, 0);
+      }, 0);
+    }
+  }
+
+  function closeControlledMenu(controller, options) {
+    if (controller.menu.hidden) return;
+    controller.menu.hidden = true;
+    controller.trigger.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('click', controller.onOutsideClick, true);
+    document.removeEventListener('keydown', controller.onKeyDown, true);
+    if (options && options.returnFocus) controller.trigger.focus();
+    if (controller.onClose) controller.onClose();
+  }
+
+  function handleControlledMenuKey(e, controller) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeControlledMenu(controller, { returnFocus: true });
+      return;
+    }
+    if (e.key === 'Tab') {
+      closeControlledMenu(controller);
+      return;
+    }
+    const items = menuItems(controller.menu);
+    const current = items.indexOf(document.activeElement);
+    const next = {
+      ArrowDown: current < 0 ? 0 : current + 1,
+      ArrowUp: current < 0 ? items.length - 1 : current - 1,
+      Home: 0,
+      End: items.length - 1,
+    }[e.key];
+    if (next === undefined) return;
+    e.preventDefault();
+    e.stopPropagation();
+    focusMenuItem(controller, next);
+  }
+
+  function createMenuController({ menu, trigger, onOpen, onClose }) {
+    const controller = { menu, defaultTrigger: trigger, trigger, onOpen, onClose };
+    controller.open = (options) => openControlledMenu(controller, options);
+    controller.close = (options) => closeControlledMenu(controller, options);
+    controller.toggle = () => menu.hidden ? controller.open() : controller.close();
+    controller.onOutsideClick = (e) => {
+      if (!menu.contains(e.target) && !controller.trigger.contains(e.target)) controller.close();
+    };
+    controller.onKeyDown = (e) => handleControlledMenuKey(e, controller);
+    return controller;
+  }
+
+  function configureFolderMenu(folderId) {
+    const managed = isDailyNotesFolder(folderId);
+    for (const action of ['rename', 'new-note', 'delete']) {
+      const item = els.folderMenu.querySelector('[data-action="' + action + '"]');
+      if (item) item.hidden = managed;
+    }
+    for (const divider of els.folderMenu.querySelectorAll('.menu-divider')) {
+      divider.hidden = managed;
+    }
+  }
+
+  const folderMenuController = createMenuController({
+    menu: els.folderMenu,
+    trigger: els.folderSwitcherBtn,
+    onOpen: () => {
+      document.removeEventListener('keydown', onFolderSwitcherKey, true);
+      const rect = folderMenuController.trigger.getBoundingClientRect();
+      const maxLeft = window.innerWidth - els.folderMenu.offsetWidth - 8;
+      els.folderMenu.style.top = Math.round(rect.bottom + 4) + 'px';
+      els.folderMenu.style.left = Math.max(8, Math.min(Math.round(rect.left), maxLeft)) + 'px';
+    },
+    onClose: () => {
+      state.folderMenuTargetId = null;
+      if (!els.folderSwitcher.hidden) document.addEventListener('keydown', onFolderSwitcherKey, true);
+    },
+  });
+
+  function openFolderMenu(folderId, trigger) {
+    closeFolderMenu();
+    state.folderMenuTargetId = folderId;
+    configureFolderMenu(folderId);
+    folderMenuController.open({ trigger });
+  }
+
+  function closeFolderMenu(options) {
+    folderMenuController.close(options);
+  }
+
+  function openFolderDeleteDialog(folderId) {
+    if (isDailyNotesFolder(folderId)) return;
+    const folder = folderById(folderId);
+    if (!folder) return;
+    state.folderDeleteId = folderId;
+    const activeCount = activeNotes().filter((n) => noteFolderId(n) === folderId).length;
+    const archivedCount = archivedNotes().filter((n) => noteFolderId(n) === folderId).length;
+    const count = activeCount + archivedCount;
+    const countDetails = archivedCount
+      ? activeCount + ' active and ' + archivedCount + ' archived'
+      : String(activeCount);
+    els.folderDeleteCopy.textContent = count
+      ? '"' + folder.name + '" contains ' + countDetails + ' note' + (count === 1 ? '' : 's') +
+        '. Keep them in Notes, or move them to Trash (recoverable for 30 days)?'
+      : '"' + folder.name + '" is empty. Delete it?';
+    els.folderDeleteTrash.hidden = count === 0;
+    els.folderDeleteKeep.textContent = count ? 'Keep the notes' : 'Delete folder';
+    openDialog(els.folderDeleteDialog);
+  }
+
+  async function applyFolderDelete(mode) {
+    const folderId = state.folderDeleteId;
+    if (isDailyNotesFolder(folderId)) return;
+    const folder = folderById(folderId);
+    if (!folder) return;
+    const members = preservedNotes().filter((n) => noteFolderId(n) === folderId);
+    const t = now();
+    const updated = members.map((note) => mode === 'trash'
+      ? { ...note, folderId: null, deletedAt: t, updatedAt: t, lastDraftAt: null }
+      : { ...note, folderId: null });
+    if (updated.length) {
+      await bulkPutNoteRecords(updated, mode === 'trash' ? undefined : 'note-folder-changed');
+      if (mode === 'trash') await Promise.all(updated.map((note) => DB.removeDraft(note.id)));
+      const nextById = new Map(updated.map((note) => [note.id, note]));
+      for (const note of state.notes) {
+        const nextNote = nextById.get(note.id);
+        if (nextNote) Object.assign(note, nextNote);
+      }
+      if (mode === 'trash' && state.selectedId && nextById.has(state.selectedId)) {
+        state.selectedId = null;
+        state.editing = false;
+        state.dirty = false;
+      }
+    }
+    await DB.removeFolder(folderId);
+    broadcastChange({ type: 'folders-changed' });
+    await loadFolders();
+    if (state.folderViewId === folderId) {
+      state.folderViewId = null;
+      writeFolderView(null);
+    }
+    state.folderDeleteId = null;
+    closeDialog(els.folderDeleteDialog);
+    renderAll();
+    toast(mode === 'trash' && updated.length
+      ? 'Folder deleted. ' + updated.length + ' note' + (updated.length === 1 ? '' : 's') + ' moved to Trash.'
+      : 'Folder deleted.');
+  }
+
+  function openMoveDialog(noteIds) {
+    const active = (noteIds || []).filter((id) => {
+      const n = getNote(id);
+      return n && !isTrashed(n);
+    });
+    const blockedDaily = active.filter((id) => isDailyNote(getNote(id))).length;
+    const ids = active.filter((id) => !isDailyNote(getNote(id)));
+    if (blockedDaily) {
+      toast(
+        blockedDaily === 1
+          ? 'Daily notes stay in Daily Notes.'
+          : blockedDaily + ' daily notes stay in Daily Notes.',
+        { tone: 'info' }
+      );
+    }
+    if (!ids.length) return;
+    state.moveTargetIds = ids;
+    const single = ids.length === 1 ? getNote(ids[0]) : null;
+    const currentId = single ? noteFolderId(single) : undefined;
+    const options = [
+      ...sortedFolders()
+        .filter((folder) => !isDailyNotesFolder(folder))
+        .map((f) => ({ id: f.id, name: f.name, color: f.color })),
+      { id: null, name: 'Notes', color: null },
+    ];
+    const buttons = options.map((opt) => {
+      const disabled = single !== null && opt.id === currentId;
+      const children = [];
+      if (opt.color) {
+        children.push(el('span', { class: 'folder-dot', attrs: { 'data-color': opt.color, 'aria-hidden': 'true' } }));
+      }
+      children.push(el('span', { text: opt.name }));
+      return el('button', {
+        class: 'move-folder-option',
+        attrs: {
+          type: 'button',
+          disabled: disabled || null,
+          'aria-disabled': disabled ? 'true' : null,
+        },
+        children,
+        on: { click: () => moveNotesToFolder(state.moveTargetIds, opt.id) },
+      });
+    });
+    els.moveFolderList.replaceChildren(...buttons);
+    openDialog(els.moveNoteDialog);
+  }
+
+  // Filing a note is organizational metadata: it must not bump updatedAt
+  // (recency order) or create a revision.
+  async function moveNotesToFolder(noteIds, folderId) {
+    const changed = [];
+    let blockedDaily = 0;
+    let blockedOrdinary = 0;
+    for (const id of noteIds || []) {
+      const note = getNote(id);
+      if (!note || isTrashed(note)) continue;
+      if (isDailyNote(note) && folderId !== DAILY_NOTES_FOLDER_ID) {
+        blockedDaily += 1;
+        continue;
+      }
+      if (!isDailyNote(note) && isDailyNotesFolder(folderId)) {
+        blockedOrdinary += 1;
+        continue;
+      }
+      if (noteFolderId(note) === folderId) continue;
+      changed.push({ ...note, folderId });
+    }
+    if (changed.length) {
+      await bulkPutNoteRecords(changed, 'note-folder-changed');
+      const nextById = new Map(changed.map((note) => [note.id, note]));
+      for (const note of state.notes) {
+        const nextNote = nextById.get(note.id);
+        if (nextNote) Object.assign(note, nextNote);
+      }
+    }
+    state.moveTargetIds = null;
+    closeDialog(els.moveNoteDialog);
+    if (state.bulkMode) bulkClear();
+    renderAll();
+    let message;
+    if (changed.length) {
+      message = 'Moved ' + changed.length + ' note' + (changed.length === 1 ? '' : 's') + ' to ' + folderDisplayName(folderId) + '.';
+    } else if (blockedOrdinary) {
+      message = 'Only daily notes are stored in Daily Notes.';
+    } else if (blockedDaily) {
+      message = 'Daily notes stay in Daily Notes.';
+    } else {
+      message = 'Notes were already there.';
+    }
+    toast(
+      message,
+      { tone: changed.length ? 'success' : 'info' }
+    );
+  }
+
+  async function moveFolder(folderId, delta) {
+    const ordered = sortedFolders();
+    const index = ordered.findIndex((f) => f.id === folderId);
+    const target = index + delta;
+    if (index < 0 || target < 0 || target >= ordered.length) return;
+    const next = [...ordered];
+    [next[index], next[target]] = [next[target], next[index]];
+    const t = now();
+    const renumbered = next.map((f, i) => ({ ...f, sortOrder: i, updatedAt: t }));
+    await DB.bulkPutFolders(renumbered);
+    broadcastChange({ type: 'folders-changed' });
+    await loadFolders();
+    renderAll();
+  }
+
+  async function runFolderMenuAction(action) {
+    const folderId = state.folderMenuTargetId;
+    closeFolderMenu();
+    if (!folderId) return;
+    if (isDailyNotesFolder(folderId) && !['move-up', 'move-down'].includes(action)) return;
+    if (action === 'rename') openFolderDialog(folderId);
+    else if (action === 'new-note') await createNote(folderId);
+    else if (action === 'move-up') await moveFolder(folderId, -1);
+    else if (action === 'move-down') await moveFolder(folderId, 1);
+    else if (action === 'delete') openFolderDeleteDialog(folderId);
+  }
+
+  function isTrashed(note) {
+    return !!(note && Number.isFinite(note.deletedAt));
+  }
+
+  function isArchived(note) {
+    return !!(note && !isTrashed(note) && Number.isFinite(note.archivedAt));
+  }
+
+  function activeNotes() {
+    return state.notes.filter((n) => !isTrashed(n) && !isArchived(n));
+  }
+
+  function archivedNotes() {
+    return state.notes.filter(isArchived);
+  }
+
+  function preservedNotes() {
+    return state.notes.filter((note) => !isTrashed(note));
+  }
+
+  function trashedNotes() {
+    return state.notes.filter(isTrashed);
+  }
+
+  function currentBaseNotes() {
+    if (state.view === 'trash') return trashedNotes();
+    if (state.view === 'archive') return archivedNotes();
+    return activeNotes();
+  }
+
+  function noteLifecycleView(note) {
+    if (isTrashed(note)) return 'trash';
+    if (isArchived(note)) return 'archive';
+    return 'active';
+  }
+
+  function selectedNoteIsInView() {
+    const note = getNote(state.selectedId);
+    return !!note && noteLifecycleView(note) === state.view;
+  }
+
+  // -------- Sidebar rendering --------
+  function tagFilteredNotes() {
+    const tag = state.tagFilter;
+    return currentBaseNotes().filter((note) => !tag || (note.tags || []).includes(tag));
+  }
+
+  function currentSearchResults() {
+    const folderNameOf = (note) => folderDisplayName(noteFolderId(note));
+    return Search.searchNotes(tagFilteredNotes(), state.search.trim(), { folderNameOf });
+  }
+  function filteredNotes() {
+    return state.search.trim() ? currentSearchResults().results.map((result) => result.note) : tagFilteredNotes();
+  }
+
+  function sortNotes(list) {
+    return [...list].sort((a, b) => lifecycleTime(b) - lifecycleTime(a));
+  }
+
+  function renderViewSwitch() {
+    for (const [view, item] of [['active', els.activeNotesView], ['archive', els.archiveView], ['trash', els.trashView]]) {
+      item.classList.toggle('is-active', state.view === view);
+      item.setAttribute('aria-checked', state.view === view ? 'true' : 'false');
+    }
+    els.viewMenuLabel.textContent = { active: 'Notes', archive: 'Archive', trash: 'Trash' }[state.view];
+    if (!els.folderNavigation) return;
+    const showNavigation = state.view !== 'trash';
+    els.folderNavigation.hidden = !showNavigation;
+    els.newFolderMenuBtn.hidden = state.view === 'archive';
+    normalizeFolderView();
+    const atHome = !state.folderViewId;
+    els.homeView.classList.toggle('is-active', atHome);
+    els.homeView.setAttribute('aria-pressed', atHome ? 'true' : 'false');
+    els.folderSwitcherLabel.textContent = folderViewName();
+    els.folderSwitcherBtn.classList.toggle('is-active', !atHome);
+    els.folderSwitcherBtn.setAttribute('aria-pressed', atHome ? 'false' : 'true');
+    els.folderSwitcherNew.hidden = state.view === 'archive';
+    renderFolderSwitcher();
+  }
+
+  function renderBulkToggle() {
+    if (!els.bulkToggle) return;
+    els.bulkToggle.classList.toggle('is-active', state.bulkMode);
+    els.bulkToggle.setAttribute('aria-checked', state.bulkMode ? 'true' : 'false');
+    els.bulkToggle.textContent = state.bulkMode ? 'Done selecting' : 'Select notes';
+  }
+
+  function renderSearchMode(children, searchResults) {
+    const chrome = SearchView.createChrome({
+      kind: searchResults.kind,
+      count: searchResults.results.length,
+      view: state.view,
+      query: state.search.trim(),
+      hasTagFilter: !!state.tagFilter,
+      filters: searchResults.filters,
+      onClear: clearSearchResults,
+    });
+    children.push(chrome.summary);
+    if (chrome.note) children.push(chrome.note);
+    const notes = searchResults.results.map((result) => result.note);
+    if (state.bulkMode && notes.length) children.push(renderBulkToolbar(notes));
+    if (notes.length) children.push(...searchResults.results.map((result) => renderRow(result.note, result)));
+    else if (chrome.empty) children.push(chrome.empty);
+    return chrome.status;
+  }
+
+  function updateSearchPresentation(status) {
+    const searching = !!state.search.trim();
+    els.sidebar.classList.toggle('is-searching', searching);
+    els.listHeader.hidden = searching;
+    els.todayNote.hidden = searching;
+    els.searchStatus.textContent = searching ? status : '';
+  }
+  function pruneBulkSelection() {
+    const valid = new Set(currentBaseNotes().map((note) => note.id));
+    for (const id of [...state.bulkSelectedIds]) {
+      if (!valid.has(id)) state.bulkSelectedIds.delete(id);
+    }
+  }
+
+  function renderSidebar() {
+    const searching = !!state.search.trim();
+    const searchResults = currentSearchResults();
+    const filtered = searching ? searchResults.results.map((result) => result.note) : filteredNotes();
+    const sorted = searching ? filtered : sortNotes(filtered);
+    const children = [];
+    let searchStatus = '';
+    pruneBulkSelection();
+
+    if (searching) {
+      searchStatus = renderSearchMode(children, searchResults);
+    } else if (state.view === 'trash') {
+      children.push(el('p', {
+        class: 'trash-retention-note',
+        text: 'Notes in Trash are deleted forever after 30 days.',
+      }));
+      if (trashedNotes().length) {
+        children.push(el('div', {
+          class: 'trash-tools',
+          children: [
+            el('button', {
+              class: 'btn btn-danger btn-sm',
+              text: 'Empty Trash',
+              attrs: { type: 'button' },
+              on: { click: () => openDialog(els.emptyTrashDialog) },
+            }),
+          ],
+        }));
+      }
+      if (state.bulkMode && sorted.length) children.push(renderBulkToolbar(sorted));
+      if (sorted.length) children.push(renderSection('Trash', sorted));
+    } else {
+      const flat = !!state.tagFilter;
+      const scopedNotes = !flat && state.folderViewId
+        ? notesForFolder(sorted, state.folderViewId === VIRTUAL_FOLDER_KEY ? null : state.folderViewId)
+        : sorted;
+      if (state.bulkMode && scopedNotes.length) children.push(renderBulkToolbar(scopedNotes));
+      if (!flat && state.folderViewId) {
+        renderFolderScope(children, scopedNotes);
+      } else {
+        const buckets = bucketizeNotes(sorted);
+        for (const bucket of buckets) {
+          if (!bucket.notes.length) continue;
+          children.push(renderSection(bucket.label, bucket.notes, bucket.isPinnedSection));
+        }
+      }
+    }
+
+    if (!searching && (!children.length || (state.view === 'trash' && !sorted.length))) {
+      children.push(renderSidebarEmptyState());
+    }
+    // Pass the same header node back in so its listeners and els refs survive.
+    els.noteList.replaceChildren(els.listHeader, ...children);
+    renderViewSwitch();
+    renderBulkToggle();
+    updateSearchPresentation(searchStatus);
+  }
+
+  function selectedBulkNotes() {
+    const selected = state.bulkSelectedIds;
+    return currentBaseNotes().filter((note) => selected.has(note.id));
+  }
+
+  function renderBulkToolbar(visibleNotes) {
+    const selected = selectedBulkNotes();
+    const selectedCount = selected.length;
+    const selectionLabel = selectedCount + ' selected';
+    const actions = [
+      el('button', {
+        class: 'btn btn-secondary btn-sm',
+        text: 'Select all',
+        attrs: { id: 'bulk-select-all', type: 'button' },
+        on: { click: () => bulkSelectAll(visibleNotes) },
+      }),
+      el('button', {
+        class: 'btn btn-secondary btn-sm',
+        text: 'Clear',
+        attrs: { id: 'bulk-clear', type: 'button', disabled: selectedCount === 0 },
+        on: { click: bulkClear },
+      }),
+      el('button', {
+        class: 'btn btn-secondary btn-sm',
+        text: 'Export JSON',
+        attrs: { id: 'bulk-export-json', type: 'button', disabled: selectedCount === 0 },
+        on: { click: bulkExportJson },
+      }),
+    ];
+
+    if (state.view === 'trash') {
+      actions.push(
+        el('button', {
+          class: 'btn btn-secondary btn-sm',
+          text: 'Restore',
+          attrs: { id: 'bulk-restore', type: 'button', disabled: selectedCount === 0 },
+          on: { click: bulkRestore },
+        }),
+        el('button', {
+          class: 'btn btn-danger btn-sm',
+          text: 'Delete forever',
+          attrs: { id: 'bulk-delete-forever', type: 'button', disabled: selectedCount === 0 },
+          on: { click: bulkDeleteForever },
+        })
+      );
+    } else {
+      actions.push(
+        el('button', {
+          class: 'btn btn-secondary btn-sm',
+          text: 'Add tag',
+          attrs: { id: 'bulk-add-tag', type: 'button', disabled: selectedCount === 0 },
+          on: { click: openBulkTagDialog },
+        }),
+        el('button', {
+          class: 'btn btn-secondary btn-sm',
+          text: 'Move to folder…',
+          attrs: { id: 'bulk-move-folder', type: 'button', disabled: selectedCount === 0 },
+          on: { click: () => openMoveDialog([...state.bulkSelectedIds]) },
+        }),
+        el('button', {
+          class: 'btn btn-secondary btn-sm',
+          text: state.view === 'archive' ? 'Unarchive' : 'Archive',
+          attrs: {
+            id: state.view === 'archive' ? 'bulk-unarchive' : 'bulk-archive',
+            type: 'button',
+            disabled: selectedCount === 0,
+          },
+          on: { click: () => bulkSetArchiveState(state.view !== 'archive') },
+        }),
+        el('button', {
+          class: 'btn btn-danger btn-sm',
+          text: 'Move to Trash',
+          attrs: { id: 'bulk-move-trash', type: 'button', disabled: selectedCount === 0 },
+          on: { click: bulkMoveToTrash },
+        })
+      );
+    }
+
+    return el('div', {
+      class: 'bulk-toolbar',
+      attrs: { id: 'bulk-toolbar' },
+      children: [
+        el('span', { class: 'bulk-count', text: selectionLabel, attrs: { id: 'bulk-selected-count' } }),
+        el('div', { class: 'bulk-actions', children: actions }),
+      ],
+    });
+  }
+
+  function renderSidebarEmptyState() {
+    const hasActiveNotes = activeNotes().length > 0;
+    const hasArchivedNotes = archivedNotes().length > 0;
+    const hasTrash = trashedNotes().length > 0;
+    const searching = !!state.search.trim() || !!state.tagFilter;
+
+    if (state.view === 'archive' && !hasArchivedNotes) {
+      return el('div', {
+        class: 'sidebar-empty',
+        children: [
+          el('p', { class: 'sidebar-empty-title', text: 'Archive is empty' }),
+          el('p', { class: 'sidebar-empty-copy', text: 'Archived notes will appear here.' }),
+        ],
+      });
+    }
+
+    if (state.view === 'trash' && !hasTrash) {
+      return el('div', {
+        class: 'sidebar-empty',
+        children: [
+          el('p', { class: 'sidebar-empty-title', text: 'Trash is empty' }),
+          el('p', { class: 'sidebar-empty-copy', text: 'Deleted notes will appear here.' }),
+        ],
+      });
+    }
+
+    if (currentBaseNotes().length && searching) {
+      return el('div', {
+        class: 'sidebar-empty',
+        children: [
+          el('p', { class: 'sidebar-empty-title', text: 'No matches' }),
+          el('p', { class: 'sidebar-empty-copy', text: 'Try a different search or clear the active filters.' }),
+          el('button', {
+            class: 'btn btn-secondary btn-sm',
+            text: 'Clear filters',
+            attrs: { type: 'button' },
+            on: { click: clearAllFilters },
+          }),
+        ],
+      });
+    }
+
+    const hasOnlyArchivedNotes = !hasActiveNotes && hasArchivedNotes;
+    return el('div', {
+      class: 'sidebar-empty',
+      children: [
+        el('p', { class: 'sidebar-empty-title', text: hasOnlyArchivedNotes ? 'No active notes' : 'No notes yet' }),
+        el('p', {
+          class: 'sidebar-empty-copy',
+          text: hasOnlyArchivedNotes
+            ? 'Your archived notes are still available.'
+            : 'Create a note or import a backup to begin.',
+        }),
+        el('div', {
+          class: 'sidebar-empty-actions',
+          children: [
+            el('button', {
+              class: 'btn btn-primary btn-sm',
+              text: 'New note',
+              attrs: { type: 'button' },
+              on: { click: createNote },
+            }),
+            el('button', {
+              class: 'btn btn-secondary btn-sm',
+              text: 'Import',
+              attrs: { type: 'button' },
+              on: { click: () => els.importFile.click() },
+            }),
+            hasOnlyArchivedNotes ? el('button', {
+              class: 'btn btn-secondary btn-sm',
+              text: 'View Archive',
+              attrs: { type: 'button' },
+              on: { click: () => setView('archive') },
+            }) : null,
+          ],
+        }),
+      ],
+    });
+  }
+
+  function notesForFolder(notes, folderId) {
+    return notes
+      .filter((note) => noteFolderId(note) === folderId)
+      .sort((a, b) => {
+        if (state.view === 'active' && !!b.pinned !== !!a.pinned) return a.pinned ? -1 : 1;
+        return lifecycleTime(b) - lifecycleTime(a);
+      });
+  }
+
+  function renderFolderScope(children, notes) {
+    const folder = folderForView(state.folderViewId);
+    const name = folder ? folder.name : 'Notes';
+    const count = notes.length;
+    children.push(el('div', {
+      class: 'folder-scope-meta',
+      text: count + ' note' + (count === 1 ? '' : 's') + ' in ' + name,
+    }));
+    if (!count) {
+      children.push(el('div', {
+        class: 'folder-scope-empty',
+        children: [
+          el('p', { text: 'Nothing is filed here yet.' }),
+          state.view === 'active' && !isDailyNotesFolder(folder) ? el('button', {
+            class: 'btn btn-secondary btn-sm',
+            text: 'New note here',
+            attrs: { type: 'button' },
+            on: { click: () => createNote(folder ? folder.id : null) },
+          }) : null,
+        ],
+      }));
+      return;
+    }
+    if (isDailyNotesFolder(folder)) children.push(...renderDailyMonthGroups(notes));
+    else children.push(...notes.map((note) => renderRow(note)));
+  }
+
+  function folderMenuIcon() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('fill', 'currentColor');
+    svg.setAttribute('aria-hidden', 'true');
+    for (const cx of [6, 12, 18]) {
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('cx', String(cx));
+      c.setAttribute('cy', '12');
+      c.setAttribute('r', '1.6');
+      svg.appendChild(c);
+    }
+    return svg;
+  }
+
+  function folderSwitcherEntries() {
+    const query = state.folderSwitcherQuery.trim().toLocaleLowerCase();
+    const options = [
+      ...sortedFolders().map((folder) => ({
+        id: folder.id,
+        name: folder.name,
+        color: folder.color,
+        folder,
+      })),
+      { id: VIRTUAL_FOLDER_KEY, name: 'Notes', color: null, folder: null },
+    ];
+    return query ? options.filter((option) => option.name.toLocaleLowerCase().includes(query)) : options;
+  }
+
+  function renderFolderSwitcher() {
+    if (!els.folderSwitcherList) return;
+    const baseNotes = currentBaseNotes();
+    const entries = folderSwitcherEntries();
+    const rows = entries.map((option) => {
+      const folderId = option.id === VIRTUAL_FOLDER_KEY ? null : option.id;
+      const count = notesForFolder(baseNotes, folderId).length;
+      const choose = el('button', {
+        class: 'folder-switcher-option' + (state.folderViewId === option.id ? ' is-current' : ''),
+        text: option.name,
+        attrs: {
+          type: 'button',
+          'data-folder-id': option.id,
+          'aria-current': state.folderViewId === option.id ? 'page' : null,
+          'aria-label': option.name + ', ' + count + ' note' + (count === 1 ? '' : 's'),
+        },
+        on: { click: () => setFolderView(option.id) },
+      });
+      const rowChildren = [
+        option.color ? el('span', {
+          class: 'folder-dot',
+          attrs: { 'data-color': option.color, 'aria-hidden': 'true' },
+        }) : null,
+        choose,
+        el('span', { class: 'folder-switcher-count', text: String(count), attrs: { 'aria-hidden': 'true' } }),
+      ];
+      if (option.folder && state.view === 'active') {
+        rowChildren.push(el('button', {
+          class: 'icon-btn folder-menu-btn folder-switcher-menu-btn',
+          attrs: {
+            type: 'button',
+            'aria-haspopup': 'menu',
+            'aria-expanded': 'false',
+            'aria-label': 'Folder actions for ' + option.name,
+            title: 'Folder actions',
+          },
+          children: [folderMenuIcon()],
+          on: { click: (e) => openFolderMenu(option.id, e.currentTarget) },
+        }));
+      }
+      const row = el('div', {
+        class: 'folder-switcher-row' + (state.folderViewId === option.id ? ' is-current' : ''),
+        attrs: { 'data-folder-id': option.id },
+        children: rowChildren,
+      });
+      if (state.view === 'active' && !isDailyNotesFolder(option.folder)) {
+        row.addEventListener('dragover', (e) => {
+          if (!Array.from(e.dataTransfer.types || []).includes('application/x-scratchpad-note')) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          row.classList.add('is-drop-target');
+        });
+        row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
+        row.addEventListener('drop', (e) => {
+          e.preventDefault();
+          row.classList.remove('is-drop-target');
+          const noteId = e.dataTransfer.getData('application/x-scratchpad-note');
+          if (noteId) moveNotesToFolder([noteId], folderId);
+        });
+      }
+      return row;
+    });
+    if (!rows.length) rows.push(el('p', {
+      class: 'folder-switcher-empty',
+      text: 'No folders match that name.',
+    }));
+    els.folderSwitcherList.replaceChildren(...rows);
+  }
+
+  function openFolderSwitcher(options) {
+    if (!els.folderSwitcher.hidden) return;
+    closeListMenu();
+    closeFolderMenu();
+    state.folderSwitcherQuery = '';
+    els.folderSwitcherSearch.value = '';
+    renderFolderSwitcher();
+    const rect = els.folderSwitcherBtn.getBoundingClientRect();
+    els.folderSwitcher.hidden = false;
+    const maxLeft = window.innerWidth - els.folderSwitcher.offsetWidth - 8;
+    els.folderSwitcher.style.top = Math.round(rect.bottom + 6) + 'px';
+    els.folderSwitcher.style.left = Math.max(8, Math.min(Math.round(rect.left), maxLeft)) + 'px';
+    els.folderSwitcherBtn.setAttribute('aria-expanded', 'true');
+    document.addEventListener('click', onFolderSwitcherOutsideClick, true);
+    document.addEventListener('keydown', onFolderSwitcherKey, true);
+    if (!options || options.focus !== false) setTimeout(() => els.folderSwitcherSearch.focus(), 0);
+  }
+
+  function closeFolderSwitcher(options) {
+    if (!els.folderSwitcher || els.folderSwitcher.hidden) return;
+    els.folderSwitcher.hidden = true;
+    els.folderSwitcherBtn.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('click', onFolderSwitcherOutsideClick, true);
+    document.removeEventListener('keydown', onFolderSwitcherKey, true);
+    if (options && options.restoreFocus) els.folderSwitcherBtn.focus();
+  }
+
+  function toggleFolderSwitcher() {
+    if (els.folderSwitcher.hidden) openFolderSwitcher();
+    else closeFolderSwitcher({ restoreFocus: true });
+  }
+
+  function onFolderSwitcherOutsideClick(e) {
+    if (els.folderSwitcher.contains(e.target) || els.folderSwitcherBtn.contains(e.target)) return;
+    closeFolderSwitcher();
+  }
+
+  function onFolderSwitcherKey(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeFolderSwitcher({ restoreFocus: true });
+    } else if (e.key === 'ArrowDown' && document.activeElement === els.folderSwitcherSearch) {
+      const first = els.folderSwitcherList.querySelector('.folder-switcher-option');
+      if (first) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  }
+
+  function dailyNotesByMonth(notes) {
+    const groups = new Map();
+    for (const note of notes) {
+      const monthKey = note.dailyDate ? note.dailyDate.slice(0, 7) : 'undated';
+      if (!groups.has(monthKey)) groups.set(monthKey, []);
+      groups.get(monthKey).push(note);
+    }
+    return [...groups.entries()]
+      .sort(([a], [b]) => {
+        if (a === 'undated') return 1;
+        if (b === 'undated') return -1;
+        return b.localeCompare(a);
+      })
+      .map(([monthKey, monthNotes]) => ({
+        monthKey,
+        notes: monthNotes.sort((a, b) => {
+          if (!a.dailyDate || !b.dailyDate) return lifecycleTime(b) - lifecycleTime(a);
+          return b.dailyDate.localeCompare(a.dailyDate) || lifecycleTime(b) - lifecycleTime(a);
+        }),
+      }));
+  }
+
+  function monthLabel(monthKey) {
+    if (monthKey === 'undated') return 'Undated';
+    const match = /^(\d{4})-(\d{2})$/.exec(monthKey || '');
+    if (!match) return monthKey;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    if (month < 1 || month > 12) return monthKey;
+    return new Date(year, month - 1, 1, 12).toLocaleDateString([], {
+      month: 'long',
+      year: 'numeric',
+    });
+  }
+
+  function renderDailyMonthGroups(notes) {
+    return dailyNotesByMonth(notes).map(({ monthKey, notes: monthNotes }) => {
+      const expanded = isDailyMonthExpanded(monthKey);
+      const notesId = 'daily-month-' + state.view + '-' + monthKey;
+      const toggle = el('button', {
+        class: 'daily-month-toggle',
+        attrs: {
+          type: 'button',
+          'aria-expanded': expanded ? 'true' : 'false',
+          'aria-controls': notesId,
+          'aria-label': (expanded ? 'Collapse ' : 'Expand ') + monthLabel(monthKey) +
+            ' (' + monthNotes.length + ' note' + (monthNotes.length === 1 ? '' : 's') + ')',
+        },
+        children: [
+          el('span', { class: 'daily-month-chevron', attrs: { 'aria-hidden': 'true' } }),
+          el('span', { class: 'daily-month-label', text: monthLabel(monthKey) }),
+          el('span', {
+            class: 'daily-month-count',
+            text: String(monthNotes.length),
+            attrs: { 'aria-hidden': 'true' },
+          }),
+        ],
+        on: { click: () => setDailyMonthExpanded(monthKey, !expanded) },
+      });
+      const monthRows = el('div', {
+        class: 'daily-month-notes',
+        attrs: { id: notesId, hidden: expanded ? null : true },
+        children: monthNotes.map((note) => renderRow(note)),
+      });
+      return el('div', {
+        class: 'daily-month-group',
+        attrs: { 'data-month': monthKey },
+        children: [toggle, monthRows],
+      });
+    });
+  }
+
+  function renderSection(label, notes, isPinnedSection) {
+    const headingClass = 'eyebrow note-section-head' + (isPinnedSection ? ' is-pinned' : '');
+    const heading = el('div', { class: headingClass, text: label });
+    const rows = notes.map((note) => renderRow(note));
+    return el('div', { class: 'note-section', children: [heading, ...rows] });
+  }
+
+  function renderRow(note, searchResult) {
+    if (state.bulkMode) return renderBulkRow(note, searchResult);
+    const trashed = isTrashed(note);
+    const archived = isArchived(note);
+    const pinned = !!(note.pinned && !trashed);
+    const effectivePinned = pinned && !archived;
+    const excerpt = searchResult ? searchResult.excerpt : noteExcerpt(note);
+    const highlightTerms = searchResult ? searchResult.highlightTerms : null;
+    const title = deriveTitle(note);
+
+    const children = [
+      el('span', {
+        class: 'note-row-title',
+        attrs: { 'aria-hidden': 'true' },
+        children: highlightedChildren(truncate(title, 64), highlightTerms),
+      }),
+    ];
+
+    if (pinned) {
+      const pinCorner = el('span', {
+        class: 'note-row-pin-corner',
+        attrs: { 'aria-hidden': 'true' },
+      });
+      pinCorner.appendChild(clonePinIcon());
+      children.push(pinCorner);
+    } else {
+      children.push(el('span', {
+        class: 'note-row-when',
+        text: lifecycleTimeLabel(note),
+        attrs: { 'aria-hidden': 'true' },
+      }));
+    }
+
+    if (excerpt) {
+      children.push(el('span', {
+        class: 'note-row-excerpt',
+        attrs: { 'aria-hidden': 'true' },
+        children: highlightedChildren(excerpt, highlightTerms),
+      }));
+    }
+
+    if (isShared(note.id)) {
+      const shareMark = el('span', {
+        class: 'note-row-share',
+        attrs: { 'aria-hidden': 'true' },
+      });
+      shareMark.appendChild(cloneShareIcon());
+      children.push(shareMark);
+      children.push(el('span', { class: 'visually-hidden', text: 'Has a live public link' }));
+    }
+
+    if (pinned) {
+      children.push(el('span', {
+        class: 'note-row-when',
+        text: lifecycleTimeLabel(note),
+        attrs: { 'aria-hidden': 'true' },
+      }));
+    }
+
+    if (note.tags && note.tags.length) {
+      const tagNodes = note.tags.slice(0, MAX_ROW_TAGS).map((tag) => trashed
+        ? el('span', {
+          class: 'note-row-tag is-static',
+          text: tag,
+        })
+        : el('button', {
+          class: 'note-row-tag',
+          attrs: {
+            type: 'button',
+            'data-tag': tag,
+            'aria-label': 'Filter notes by tag ' + tag,
+          },
+          children: highlightedChildren(tag, highlightTerms),
+          on: { click: () => setTagFilter(tag) },
+        }));
+      if (note.tags.length > MAX_ROW_TAGS) {
+        tagNodes.push(el('span', {
+          class: 'note-row-tag-more',
+          text: '+' + (note.tags.length - MAX_ROW_TAGS),
+        }));
+      }
+      children.push(el('span', {
+        class: 'note-row-tags',
+        attrs: trashed
+          ? { 'aria-hidden': 'true' }
+          : { role: 'group', 'aria-label': 'Tags for ' + title },
+        children: tagNodes,
+      }));
+    }
+
+    const openButton = el('button', {
+      class: 'note-row-open',
+      attrs: {
+        type: 'button',
+        'aria-label': 'Open ' + title +
+          (archived && note.pinned ? ', pinned when active' : '') +
+          (searchResult && searchResult.kind === 'close' ? ', close match' : ''),
+        'aria-current': note.id === state.selectedId ? 'true' : null,
+      },
+      on: { click: () => selectNote(note.id) },
+    });
+
+    const draggable =
+      state.view === 'active' &&
+      !state.bulkMode &&
+      !isDailyNote(note);
+    return el('div', {
+      class: 'note-row' +
+        (searchResult ? ' is-search-result' : '') +
+        (note.id === state.selectedId ? ' is-active' : '') +
+        (trashed ? ' is-trashed' : '') +
+        (archived ? ' is-archived' : '') +
+        (effectivePinned ? ' is-pinned' : '') +
+        (archived && pinned ? ' is-pin-dormant' : ''),
+      attrs: {
+        'data-id': note.id,
+        'data-search-kind': searchResult ? searchResult.kind : null,
+        draggable: draggable ? 'true' : null,
+      },
+      on: draggable ? {
+        dragstart: (e) => {
+          e.dataTransfer.setData('application/x-scratchpad-note', note.id);
+          e.dataTransfer.setData('text/plain', note.id);
+          e.dataTransfer.effectAllowed = 'move';
+          openFolderSwitcher({ focus: false });
+        },
+      } : null,
+      children: [openButton, ...children],
+    });
+  }
+
+  function renderBulkRow(note, searchResult) {
+    const trashed = isTrashed(note);
+    const archived = isArchived(note);
+    const pinned = !!(note.pinned && !trashed && !archived);
+    const excerpt = searchResult ? searchResult.excerpt : noteExcerpt(note);
+    const highlightTerms = searchResult ? searchResult.highlightTerms : null;
+    const selected = state.bulkSelectedIds.has(note.id);
+    const checkbox = el('input', {
+      attrs: {
+        type: 'checkbox',
+        checked: selected,
+        'aria-label': 'Select ' + deriveTitle(note),
+      },
+      on: {
+        change: (e) => toggleBulkNote(note.id, e.currentTarget.checked),
+      },
+    });
+    const children = [
+      el('span', { class: 'note-row-check', children: [checkbox] }),
+      el('span', {
+        class: 'note-row-title',
+        children: highlightedChildren(truncate(deriveTitle(note), 64), highlightTerms),
+      }),
+      el('span', { class: 'note-row-when', text: lifecycleTimeLabel(note) }),
+    ];
+    if (excerpt) {
+      children.push(el('span', {
+        class: 'note-row-excerpt',
+        children: highlightedChildren(excerpt, highlightTerms),
+      }));
+    }
+    if (note.tags && note.tags.length) {
+      const tagNodes = note.tags.slice(0, MAX_ROW_TAGS).map((t) =>
+        el('span', {
+          class: 'note-row-tag',
+          attrs: { 'data-tag': t },
+          children: highlightedChildren(t, highlightTerms),
+        })
+      );
+      if (note.tags.length > MAX_ROW_TAGS) {
+        tagNodes.push(el('span', {
+          class: 'note-row-tag-more',
+          text: '+' + (note.tags.length - MAX_ROW_TAGS),
+        }));
+      }
+      children.push(el('span', { class: 'note-row-tags', children: tagNodes }));
+    }
+    return el('label', {
+      class: 'note-row is-bulk' +
+        (note.id === state.selectedId ? ' is-active' : '') +
+        (trashed ? ' is-trashed' : '') +
+        (archived ? ' is-archived' : '') +
+        (pinned ? ' is-pinned' : '') +
+        (selected ? ' is-selected' : ''),
+      attrs: { 'data-id': note.id },
+      children,
+    });
+  }
+
+  // -------- Editor rendering --------
+  // Since first-run seeding landed, a newcomer never reaches this state — they
+  // arrive with starter notes. Whoever sees it has used Scratchpad before and
+  // has nothing here now: they cleared it, or the browser evicted the database.
+  // So the copy stays neutral about which, and names the way back either way.
+  function renderNoActiveNotesState() {
+    const hasArchivedNotes = archivedNotes().length > 0;
+    els.emptyNoNotesTitle.textContent = hasArchivedNotes ? 'No active notes' : 'No notes here';
+    els.emptyNoNotesCopy.textContent = hasArchivedNotes
+      ? 'Everything you have written is in Archive. Bring one back, or start something new.'
+      : 'Start a new note, or restore from a backup file.';
+    els.emptyViewArchive.hidden = !hasArchivedNotes;
+  }
+
+  let lastRenderedNoteId = null;
+  let lastEditorMode = false;
+
+  function renderEditor() {
+    const note = getNote(state.selectedId);
+    if (!note) {
+      if (window.ScratchpadPlace) window.ScratchpadPlace.hold(null);
+      els.editorView.hidden = true;
+      els.editorCard.classList.remove('is-editing');
+      els.backlinksSection.hidden = true;
+      lastRenderedNoteId = null;
+      lastEditorMode = false;
+      if (window.ScratchpadOutline) window.ScratchpadOutline.sync();
+      return;
+    }
+    if (window.ScratchpadPlace) window.ScratchpadPlace.hold(note.id);
+
+    const trashed = isTrashed(note);
+    const archived = isArchived(note);
+    if (trashed) state.editing = false;
+    HomeDesk.show('editor');
+    els.titleInput.disabled = trashed;
+    els.tagBar.classList.toggle('is-readonly', trashed);
+
+    const noteChanged = lastRenderedNoteId !== note.id;
+    if (noteChanged) {
+      els.tagInput.value = '';
+      els.tagInput.hidden = true;
+      closeOverflowMenu();
+    }
+    lastRenderedNoteId = note.id;
+    const preserveDraftInputs = state.editing && state.dirty && !trashed;
+    if (!preserveDraftInputs && document.activeElement !== els.titleInput) {
+      els.titleInput.value = note.title || '';
+    }
+    els.titleInput.placeholder = deriveTitle({ ...note, title: '' }) || 'Untitled note';
+
+    const showInput = state.editing && !trashed;
+    const enteringEdit = showInput && (!lastEditorMode || noteChanged);
+    els.editorCard.classList.toggle('is-editing', showInput);
+    els.formatToolbar.hidden = !showInput;
+    if (enteringEdit) els.editorCard.scrollTop = 0;
+    lastEditorMode = showInput;
+
+    els.titleDisplay.hidden = showInput;
+    els.titleInput.hidden = !showInput;
+    els.titleDisplay.replaceChildren(...highlightedChildren(deriveTitle(note)));
+
+    window.ScratchpadBreadcrumb.render(els.breadcrumb, note);
+    renderEyebrow(note);
+    renderByline(note);
+    renderPinButton(note);
+    renderTagBar(note, !trashed);
+
+    els.pinToggle.hidden = trashed;
+    els.shareBtn.hidden = trashed;
+    els.deleteBtn.hidden = trashed;
+    els.archiveNoteBtn.hidden = trashed || archived;
+    els.unarchiveNoteBtn.hidden = trashed || !archived;
+    els.restoreBtn.hidden = !trashed;
+    els.permanentDeleteBtn.hidden = !trashed;
+    els.moveNoteOverflow.hidden = trashed || isDailyNote(note);
+    els.duplicateOverflowBtn.hidden = trashed;
+    els.historyBtn.hidden = trashed;
+    els.exportOverflowBtn.hidden = els.printOverflowBtn.hidden = trashed;
+    els.discardOverflowBtn.hidden = !(state.editing && state.dirty);
+
+    const bodyEmpty = !(note.body || '').trim();
+    const showEmptyState = bodyEmpty && !state.editing && !trashed;
+    els.editorEmptyState.hidden = !showEmptyState;
+    els.editorDocHead.hidden = showEmptyState;
+    els.tagBar.hidden = showEmptyState;
+
+    if (state.editing && !trashed) {
+      els.editor.hidden = false;
+      els.rendered.hidden = true;
+      if (!preserveDraftInputs && document.activeElement !== els.editor) {
+        els.editor.value = note.body || '';
+      }
+      els.editBtn.hidden = true;
+      els.saveBtn.hidden = false;
+    } else {
+      els.editor.hidden = true;
+      if (showEmptyState) {
+        els.rendered.hidden = true;
+      } else if (bodyEmpty) {
+        els.rendered.hidden = false;
+        Markdown.renderEmptyBody(els.rendered);
+      } else {
+        els.rendered.hidden = false;
+        Markdown.renderMarkdownInto(els.rendered, note.body || '');
+        syncTaskCheckboxes(note);
+        SearchView.highlightElement(els.rendered, Search.parseQuery(state.search).text);
+      }
+      els.editBtn.hidden = trashed;
+      els.saveBtn.hidden = true;
+    }
+
+    els.dirtyIndicator.hidden = !state.dirty || trashed;
+    renderBacklinks(note);
+    if (window.ScratchpadMentions) window.ScratchpadMentions.render(note);
+    if (window.ScratchpadAttachments) window.ScratchpadAttachments.warm(note ? note.id : null);
+    if (window.ScratchpadOutline) window.ScratchpadOutline.sync();
+    if (window.ScratchpadPlace) window.ScratchpadPlace.restore(note.id, showInput, !!(noteChanged || enteringEdit));
+  }
+
+  function renderEyebrow(note) {
+    const trashed = isTrashed(note);
+    const archived = isArchived(note);
+    const pinned = note.pinned && !trashed && !archived;
+    const readTime = Markdown.formatReadTime(Markdown.wordCount(note.body || '')) + ' read';
+    let label;
+    if (trashed) label = 'Note · trashed · ' + readTime;
+    else if (archived) label = folderDisplayName(noteFolderId(note)) + ' · archived · ' + readTime;
+    else if (isDailyNote(note)) label = 'Daily note · ' + readTime;
+    else if (pinned) label = folderDisplayName(noteFolderId(note)) + ' · pinned · ' + readTime;
+    else label = folderDisplayName(noteFolderId(note)) + ' · draft · ' + readTime;
+    els.noteEyebrow.textContent = label;
+  }
+
+  function renderByline(note) {
+    const words = Markdown.wordCount(note.body || '');
+    const created = formatBylineDate(note.createdAt);
+    const updated = formatBylineDate(note.updatedAt);
+    const wordLabel = words + ' word' + (words === 1 ? '' : 's');
+    const parts = isArchived(note)
+      ? [
+        'Archived ' + formatBylineDate(note.archivedAt),
+        'Last edited ' + updated,
+        wordLabel,
+        Markdown.formatReadTime(words) + ' read',
+      ]
+      : [
+        'Created ' + created,
+        'Updated ' + updated,
+        wordLabel,
+        Markdown.formatReadTime(words) + ' read',
+      ];
+    els.noteByline.textContent = parts.join(' · ');
+  }
+
+  function formatBylineDate(ms) {
+    const d = new Date(ms || now());
+    const today = new Date();
+    const sameDay =
+      d.getFullYear() === today.getFullYear() &&
+      d.getMonth() === today.getMonth() &&
+      d.getDate() === today.getDate();
+    if (sameDay) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const sameYear = d.getFullYear() === today.getFullYear();
+    return d.toLocaleDateString([], sameYear ? { month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+
+  function renderPinButton(note) {
+    els.pinToggle.setAttribute('aria-checked', note.pinned ? 'true' : 'false');
+    els.pinToggle.classList.toggle('is-active', !!note.pinned);
+    const label = isArchived(note)
+      ? (note.pinned ? 'Unpin when active' : 'Pin when active')
+      : (note.pinned ? 'Unpin note' : 'Pin note');
+    els.pinToggle.title = label;
+    els.pinToggle.setAttribute('aria-label', label);
+    els.pinToggle.textContent = label;
+  }
+
+  function renderTagPills(note, canEdit) {
+    const items = (note.tags || []).map((tag) => {
+      const filterBtn = el('button', {
+        class: 'tag-pill-filter',
+        text: tag,
+        attrs: { type: 'button', title: 'Filter by #' + tag, 'aria-label': 'Filter by ' + tag },
+        on: { click: () => setTagFilter(tag) },
+      });
+      const children = [filterBtn];
+      if (canEdit) {
+        children.push(el('button', {
+          class: 'tag-pill-remove',
+          text: '×',
+          attrs: { type: 'button', title: 'Remove tag', 'aria-label': 'Remove tag ' + tag },
+          on: { click: () => removeTag(tag) },
+        }));
+      }
+      const pill = el('span', { class: 'badge badge-accent tag-pill', children });
+      return el('li', { class: 'tag-pill-item', children: [pill] });
+    });
+    els.tagPills.replaceChildren(...items);
+  }
+
+  // Collapsible tag bar state: empty (just a "+ Add tag" pill), pills with
+  // a "+" affordance, or an open input. Preserves input focus during renders.
+  function renderTagBar(note, canEdit) {
+    renderTagPills(note, canEdit);
+    const tags = note.tags || [];
+    const inputOpen = !els.tagInput.hidden;
+
+    if (!canEdit) {
+      els.tagAddEmpty.hidden = true;
+      els.tagAddPlus.hidden = true;
+      els.tagInput.hidden = true;
+      els.tagInput.disabled = true;
+      return;
+    }
+    els.tagInput.disabled = false;
+
+    if (inputOpen) {
+      els.tagAddEmpty.hidden = true;
+      els.tagAddPlus.hidden = true;
+      return;
+    }
+
+    if (tags.length === 0) {
+      els.tagAddEmpty.hidden = false;
+      els.tagAddPlus.hidden = true;
+    } else {
+      els.tagAddEmpty.hidden = true;
+      els.tagAddPlus.hidden = false;
+    }
+  }
+
+  function openTagInput() {
+    els.tagAddEmpty.hidden = true;
+    els.tagAddPlus.hidden = true;
+    els.tagInput.hidden = false;
+    setTimeout(() => els.tagInput.focus(), 0);
+  }
+
+  function collapseTagInput() {
+    els.tagInput.hidden = true;
+    const note = getNote(state.selectedId);
+    if (note && !isTrashed(note)) renderTagBar(note, true);
+  }
+
+  // -------- Active filter chip --------
+  function renderActiveFilter() {
+    if (state.tagFilter) {
+      els.activeFilter.hidden = false;
+      els.activeFilterTag.textContent = '#' + state.tagFilter;
+    } else {
+      els.activeFilter.hidden = true;
+      els.activeFilterTag.textContent = '';
+    }
+  }
+
+  // -------- State mutations --------
+  // Tombstoned notes expire after TRASH_RETENTION_MS; the deletedAt stamp
+  // already records when trashing happened, so purge is a startup filter.
+  async function purgeExpiredTrash() {
+    const cutoff = now() - TRASH_RETENTION_MS;
+    const all = (await DB.getAll()).map(normalizeNote);
+    const expired = all.filter((n) => Number.isFinite(n.deletedAt) && n.deletedAt < cutoff);
+    for (const note of expired) await deleteNoteRecord(note.id);
+    return expired.length;
+  }
+
+  async function loadAll() {
+    await loadFolders();
+    const all = await DB.getAll();
+    state.notes = all.map(normalizeNote);
+    await ensureDailyNotesFolder();
+    ensureSelectionForView();
+    renderAll();
+    await maybePromptDraftForSelected();
+  }
+
+  function ensureSelectionForView() {
+    if (HomeDesk.holds()) return;
+    const visible = filteredNotes();
+    const hasFilter = !!(state.search || state.tagFilter);
+    if (state.editing && state.dirty && selectedNoteIsInView()) return;
+    if (state.search.trim() && selectedNoteIsInView()) return;
+    if (selectedNoteIsInView() && (!hasFilter || visible.some((n) => n.id === state.selectedId))) return;
+    const pinned = state.view === 'active'
+      ? sortNotes(visible.filter((n) => n.pinned && !isTrashed(n)))
+      : [];
+    const others = state.view === 'active'
+      ? sortNotes(visible.filter((n) => !n.pinned || isTrashed(n)))
+      : sortNotes(visible);
+    const next = pinned.concat(others)[0] || currentBaseNotes()[0] || null;
+    state.selectedId = next ? next.id : null;
+  }
+
+  function updateNoteCount() {
+    if (!els.noteCount) return;
+    const count = activeNotes().length;
+    els.noteCount.textContent = String(count);
+    if (els.noteCountNoun) els.noteCountNoun.textContent = count === 1 ? 'note' : 'notes';
+  }
+
+  function localDateKey(date) {
+    return date.getFullYear() + '-' +
+      String(date.getMonth() + 1).padStart(2, '0') + '-' +
+      String(date.getDate()).padStart(2, '0');
+  }
+
+  function localDateFromKey(key) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key || '');
+    if (!match) return null;
+    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function chronicleDateForNote(note) {
+    if (note && note.dailyDate) {
+      const dailyDate = localDateFromKey(note.dailyDate);
+      if (dailyDate) return dailyDate;
+    }
+    return new Date(note && Number.isFinite(note.createdAt) ? note.createdAt : now());
+  }
+
+  function renderChronicle() {
+    if (!els.chronicleDays) return;
+    const selected = getNote(state.selectedId);
+    const contextDate = chronicleDateForNote(selected);
+    const activeKey = selected ? localDateKey(contextDate) : todayKey();
+    const today = new Date();
+    const dayButtons = [];
+
+    els.chronicleMonth.textContent = today.toLocaleDateString([], { month: 'long' });
+    els.editorDateNumber.textContent = String(contextDate.getDate());
+    els.editorDateDay.textContent = contextDate.toLocaleDateString([], { weekday: 'short' });
+    els.editorDateSpine.title = contextDate.toLocaleDateString([], {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+
+    for (let offset = 4; offset >= 0; offset -= 1) {
+      const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - offset, 12);
+      const key = localDateKey(date);
+      dayButtons.push(el('button', {
+        class: 'chronicle-day' + (key === activeKey ? ' is-active' : '') + (key === todayKey() ? ' is-today' : ''),
+        attrs: {
+          type: 'button',
+          'data-date': key,
+          'aria-current': key === activeKey ? 'date' : null,
+          'aria-label': 'Open daily note for ' + date.toLocaleDateString([], {
+            weekday: 'long',
+            month: 'long',
+            day: 'numeric',
+          }),
+        },
+        children: [
+          el('b', { text: String(date.getDate()) }),
+          el('small', { text: key === todayKey() ? 'Today' : date.toLocaleDateString([], { weekday: 'short' }) }),
+        ],
+        on: { click: (event) => openDailyNote(key, event.currentTarget) },
+      }));
+    }
+    els.chronicleDays.replaceChildren(...dayButtons);
+  }
+
+  // -------- Overflow menu (#6) --------
+  // role="menu" with APG keyboard semantics: focus moves into the menu on open,
+  // Up/Down/Home/End cycle items, Esc closes and returns focus to the trigger.
+  const overflowMenuController = createMenuController({
+    menu: els.overflowMenu,
+    trigger: els.overflowBtn,
+  });
+
+  function openOverflowMenu() {
+    overflowMenuController.open();
+  }
+
+  function closeOverflowMenu(opts) {
+    overflowMenuController.close(opts);
+  }
+
+  function toggleOverflowMenu() {
+    overflowMenuController.toggle();
+  }
+
+  // -------- List overflow menu --------
+  // Same APG pattern as the editor overflow menu, for the sidebar's
+  // Manage tags / New folder / Select notes actions.
+  const listMenuController = createMenuController({ menu: els.listMenu, trigger: els.listMenuBtn });
+  const viewMenuController = createMenuController({ menu: els.viewMenu, trigger: els.viewMenuBtn });
+
+  function openListMenu() {
+    listMenuController.open();
+  }
+
+  function closeListMenu(opts) {
+    listMenuController.close(opts);
+  }
+
+  function toggleListMenu() {
+    listMenuController.toggle();
+  }
+
+  // -------- Backup menu (sidebar foot) --------
+  // Same APG pattern again; opens upward from the backup status chip.
+  const backupMenuController = createMenuController({
+    menu: els.backupMenu,
+    trigger: els.backupChip,
+    onOpen: renderBackupMenuMeta,
+  });
+
+  function openBackupMenu() {
+    backupMenuController.open();
+  }
+
+  function closeBackupMenu(opts) {
+    backupMenuController.close(opts);
+  }
+
+  function toggleBackupMenu() {
+    backupMenuController.toggle();
+  }
+
+  function renderAll() {
+    ensureSelectionForView();
+    renderSidebar();
+    renderActiveFilter();
+    updateNoteCount();
+    renderChronicle();
+    renderBackupChip();
+    renderNoActiveNotesState();
+
+    const base = currentBaseNotes();
+    if (state.view === 'trash' && base.length === 0) {
+      HomeDesk.show('trash');
+    } else if (state.view === 'archive' && base.length === 0) {
+      HomeDesk.show('archive');
+    } else if (state.view === 'active' && activeNotes().length === 0) {
+      HomeDesk.show('no-notes');
+    } else if (state.search.trim() && state.selectedId && selectedNoteIsInView()) {
+      renderEditor();
+    } else if (filteredNotes().length === 0) {
+      HomeDesk.show('no-results');
+    } else if (state.selectedId && getNote(state.selectedId)) {
+      renderEditor();
+    } else {
+      HomeDesk.show('desk');
+    }
+    syncMobileView();
+  }
+
+  async function setView(view) {
+    if (view === state.view) return;
+    closeFolderSwitcher();
+    if (state.editing && state.dirty) {
+      const ok = await confirmDiscard();
+      if (!ok) return;
+      await discardCurrentDraft();
+    }
+    state.view = view;
+    state.editing = false;
+    state.dirty = false;
+    state.selectedId = null;
+    renderAll();
+    await maybePromptDraftForSelected();
+  }
+
+  // folderId is optional; direct event-handler bindings pass a click event
+  // here, which the typeof guard treats as "no folder".
+  async function createNote(folderId) {
+    if (state.editing && state.dirty) {
+      const ok = await confirmDiscard();
+      if (!ok) return;
+      await discardCurrentDraft();
+    }
+    const t = now();
+    const requestedFolderId = typeof folderId === 'string' ? folderId : currentNewNoteFolderId();
+    const targetFolderId =
+      requestedFolderId && !isDailyNotesFolder(requestedFolderId) && folderById(requestedFolderId)
+        ? requestedFolderId
+        : null;
+    const note = {
+      id: uuid(),
+      title: '',
+      body: '',
+      tags: [],
+      pinned: false,
+      folderId: targetFolderId,
+      createdAt: t,
+      updatedAt: t,
+      archivedAt: null,
+      deletedAt: null,
+      lastDraftAt: null,
+    };
+    return withBusy('create-note', [els.newNote, els.emptyNewNote], 'Could not create a new note.', async () => {
+      await putNoteRecord(note);
+      state.view = 'active';
+      state.notes.push(note);
+      state.selectedId = note.id;
+      state.editing = true;
+      state.dirty = false;
+      renderAll();
+      state.mobileView = 'editor';
+      syncMobileView();
+      window.ScratchpadFind.editorFocus(els.editor);
+    });
+  }
+
+  // Untitled notes derive their sidebar title from the body (see deriveTitle),
+  // so suffixing an empty title field would leave the duplicate showing the
+  // exact same row text as the original with no sign it's a copy. Suffixing
+  // the derived title instead — and storing it as the copy's explicit title —
+  // keeps the duplicate visibly distinct in the sidebar either way.
+  function duplicateTitle(note) {
+    const base = deriveTitle(note);
+    const suffix = ' (copy)';
+    const trimmedBase = base.length + suffix.length > NOTE_TITLE_MAX
+      ? base.slice(0, NOTE_TITLE_MAX - suffix.length)
+      : base;
+    return trimmedBase + suffix;
+  }
+
+  async function duplicateCurrentNote() {
+    const note = getNote(state.selectedId);
+    if (!note || isTrashed(note)) return;
+    if (state.editing && state.dirty) {
+      const ok = await confirmDiscard();
+      if (!ok) return;
+      await discardCurrentDraft();
+    }
+    return withBusy('duplicate-note', [els.overflowBtn], 'Could not duplicate the note.', async () => {
+      const t = now();
+      const copy = normalizeNote({
+        ...note,
+        id: uuid(),
+        title: duplicateTitle(note),
+        pinned: false,
+        folderId: isDailyNote(note) ? null : note.folderId,
+        createdAt: t,
+        updatedAt: t,
+        archivedAt: null,
+        deletedAt: null,
+        lastDraftAt: null,
+        dailyDate: null,
+        monthlyReviewMonth: null,
+      });
+      await putNoteRecord(copy);
+      state.notes.push(copy);
+      state.view = 'active';
+      state.selectedId = copy.id;
+      state.editing = false;
+      state.dirty = false;
+      renderAll();
+      toast('Note duplicated.');
+    });
+  }
+
+  async function selectNote(id) {
+    if (state.selectedId === id && !state.editing) {
+      state.mobileView = 'editor';
+      syncMobileView();
+      focusMobilePane();
+      return;
+    }
+    if (state.editing && state.dirty) {
+      const ok = await confirmDiscard();
+      if (!ok) return;
+      await discardCurrentDraft();
+    }
+    state.selectedId = id;
+    state.editing = false;
+    state.dirty = false;
+    state.mobileView = 'editor';
+    renderAll();
+    focusMobilePane();
+    await maybePromptDraftForSelected();
+  }
+
+  function enterEditMode() {
+    const note = getNote(state.selectedId);
+    if (!note || isTrashed(note) || state.editing) return;
+    state.editing = true;
+    state.dirty = false;
+    renderEditor();
+    window.ScratchpadFind.editorFocus(els.editor);
+  }
+
+  async function saveCurrent() {
+    if (!state.editing) return;
+    const note = getNote(state.selectedId);
+    if (!note || isTrashed(note)) return;
+    return withBusy('save', [els.saveBtn], 'Save failed. Your unsaved edits are still open.', async () => {
+      const nextTitle = els.titleInput.value.trim();
+      const nextBody = els.editor.value;
+      const latestRaw = await DB.get(note.id);
+      const latest = latestRaw ? normalizeNote(latestRaw) : null;
+      const hasConflict = !latest || latest.updatedAt !== note.updatedAt || state.externalChanges.has(note.id);
+      let conflictChoice = null;
+      if (hasConflict) {
+        conflictChoice = await chooseSaveConflict(latest);
+        if (!conflictChoice) return;
+        if (conflictChoice === 'saved') {
+          await DB.removeDraft(note.id);
+          state.externalChanges.delete(note.id);
+          if (latest) {
+            const index = state.notes.findIndex((item) => item.id === note.id);
+            if (index >= 0) state.notes[index] = latest;
+          } else {
+            state.notes = state.notes.filter((item) => item.id !== note.id);
+            state.selectedId = null;
+          }
+          state.editing = false;
+          state.dirty = false;
+          renderAll();
+          return;
+        }
+        if (conflictChoice === 'copy') {
+          const copy = normalizeNote({
+            ...(latest || note),
+            id: uuid(),
+            title: nextTitle,
+            body: nextBody,
+            createdAt: now(),
+            updatedAt: now(),
+            lastDraftAt: null,
+            monthlyReviewMonth: null,
+          });
+          await putNoteRecord(copy);
+          await DB.removeDraft(note.id);
+          state.externalChanges.delete(note.id);
+          if (latest) {
+            const index = state.notes.findIndex((item) => item.id === note.id);
+            if (index >= 0) state.notes[index] = latest;
+          }
+          state.notes.push(copy);
+          state.selectedId = copy.id;
+          state.editing = false;
+          state.dirty = false;
+          renderAll();
+          toast('Saved your edits as a separate note.');
+          return;
+        }
+      }
+      const baseNote = latest || note;
+      const previousDisplayTitle = deriveTitle(baseNote);
+      const changed = (baseNote.title || '') !== nextTitle || (baseNote.body || '') !== nextBody;
+      const nextNote = {
+        ...baseNote,
+        title: nextTitle,
+        body: nextBody,
+        updatedAt: nextUpdatedAt(baseNote),
+        lastDraftAt: null,
+      };
+      if (changed) await storeRevision(baseNote);
+      await putNoteRecord(nextNote);
+      await DB.removeDraft(note.id);
+      const index = state.notes.findIndex((item) => item.id === note.id);
+      if (index >= 0) state.notes[index] = nextNote;
+      state.externalChanges.delete(note.id);
+      state.editing = false;
+      state.dirty = false;
+      renderAll();
+      await maybeOfferLinkRewrite(previousDisplayTitle, deriveTitle(nextNote), nextNote.id);
+    });
+  }
+
+  function chooseSaveConflict(latest) {
+    state.saveConflict = latest;
+    els.saveConflictCopy.textContent = latest
+      ? 'This note changed in another tab. Your edits are still open; choose which version to keep.'
+      : 'This note was deleted in another tab. You can keep your edits as a separate note.';
+    els.conflictKeepMine.hidden = !latest;
+    openDialog(els.saveConflictDialog);
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (choice) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        closeDialog(els.saveConflictDialog);
+        state.saveConflict = null;
+        resolve(choice);
+      };
+      const useSaved = () => finish('saved');
+      const saveCopy = () => finish('copy');
+      const keepMine = () => finish('mine');
+      const onClose = () => {
+        if (!settled) finish(null);
+      };
+      const cleanup = () => {
+        els.conflictUseSaved.removeEventListener('click', useSaved);
+        els.conflictSaveCopy.removeEventListener('click', saveCopy);
+        els.conflictKeepMine.removeEventListener('click', keepMine);
+        els.saveConflictDialog.removeEventListener('close', onClose);
+      };
+      els.conflictUseSaved.addEventListener('click', useSaved);
+      els.conflictSaveCopy.addEventListener('click', saveCopy);
+      els.conflictKeepMine.addEventListener('click', keepMine);
+      els.saveConflictDialog.addEventListener('close', onClose);
+    });
+  }
+
+  async function storeRevision(note) {
+    const snapshot = normalizeRevision({
+      id: uuid(),
+      noteId: note.id,
+      title: note.title || '',
+      body: note.body || '',
+      tags: [...(note.tags || [])],
+      pinned: !!note.pinned,
+      createdAt: note.createdAt,
+      updatedAt: note.updatedAt,
+      savedAt: now(),
+      deletedAt: note.deletedAt,
+    }, note.id);
+    await DB.putRevision(snapshot);
+    await DB.pruneRevisions(note.id, REVISION_LIMIT);
+  }
+
+  async function applyArchiveState(note, archivedAt) {
+    const nextNote = { ...note, archivedAt };
+    await putNoteRecord(nextNote, 'note-lifecycle-changed');
+    Object.assign(note, nextNote);
+    state.view = noteLifecycleView(note);
+    state.selectedId = note.id;
+    renderAll();
+  }
+
+  async function setCurrentArchiveState(shouldArchive) {
+    const note = getNote(state.selectedId);
+    if (!note || isTrashed(note) || isArchived(note) === shouldArchive) return;
+    const previousArchivedAt = note.archivedAt;
+    const nextArchivedAt = shouldArchive ? now() : null;
+    const controls = shouldArchive ? [els.archiveNoteBtn] : [els.unarchiveNoteBtn];
+    const errorMessage = shouldArchive
+      ? 'Archive failed. The note is still in Notes.'
+      : 'Unarchive failed. The note is still in Archive.';
+
+    return withBusy('archive-state', controls, errorMessage, async () => {
+      await applyArchiveState(note, nextArchivedAt);
+      toast(shouldArchive ? 'Archived.' : 'Unarchived.', {
+        duration: 8000,
+        actionLabel: 'Undo',
+        action: async () => {
+          const current = getNote(note.id);
+          if (!current || isTrashed(current)) return;
+          await applyArchiveState(current, previousArchivedAt);
+        },
+      });
+    });
+  }
+
+  async function moveCurrentToTrash() {
+    const note = getNote(state.selectedId);
+    if (!note || isTrashed(note)) return;
+    if (state.editing && state.dirty) {
+      const ok = await confirmDiscard();
+      if (!ok) return;
+      await discardCurrentDraft();
+    }
+    return withBusy('move-trash', [els.confirmDelete, els.deleteBtn], 'Delete failed. The note is still in Notes.', async () => {
+      // Trashing a note takes its share dialog away, so a live public link would
+      // become unrevokable. Revoke first; restoring can always share again.
+      const stillLive = await revokeSharesForNote(note.id);
+      await syncSharedNoteIds();
+      const t = now();
+      const nextNote = { ...note, deletedAt: t, updatedAt: t, lastDraftAt: null };
+      await putNoteRecord(nextNote);
+      await DB.removeDraft(note.id);
+      Object.assign(note, nextNote);
+      state.editing = false;
+      state.dirty = false;
+      state.selectedId = null;
+      state.mobileView = 'list';
+      renderAll();
+      toast('Moved to Trash.');
+      warnUnrevoked(stillLive, 'Restore the note to retry.');
+    });
+  }
+
+  async function restoreCurrentFromTrash() {
+    const note = getNote(state.selectedId);
+    if (!note || !isTrashed(note)) return;
+    return withBusy('restore', [els.restoreBtn], 'Restore failed. The note is still in Trash.', async () => {
+      const nextNote = { ...note, deletedAt: null };
+      await putNoteRecord(nextNote);
+      Object.assign(note, nextNote);
+      state.view = noteLifecycleView(note);
+      state.selectedId = note.id;
+      renderAll();
+      toast('Note restored.');
+    });
+  }
+
+  async function permanentlyDeleteCurrent() {
+    const id = state.selectedId;
+    if (!id) return;
+    return withBusy('permanent-delete', [els.confirmPermanentDelete, els.permanentDeleteBtn], 'Permanent delete failed. The note is still in Trash.', async () => {
+      const stillLive = await revokeSharesForNote(id);
+      await deleteNoteRecord(id);
+      await syncSharedNoteIds();
+      state.notes = state.notes.filter((n) => n.id !== id);
+      state.selectedId = null;
+      state.editing = false;
+      state.dirty = false;
+      renderAll();
+      toast('Note permanently deleted.');
+      warnUnrevoked(stillLive);
+    });
+  }
+
+  async function emptyTrash() {
+    const notes = trashedNotes();
+    return withBusy('empty-trash', [els.confirmEmptyTrash], 'Empty Trash failed. Trashed notes were not removed.', async () => {
+      // Deleting forever destroys each share row and with it the only copy of
+      // the revoke token, so the revoke must come first.
+      const stillLive = (await Promise.all(notes.map((note) => revokeSharesForNote(note.id))))
+        .reduce((sum, count) => sum + count, 0);
+      await Promise.all(notes.map((note) => deleteNoteRecord(note.id)));
+      await syncSharedNoteIds();
+      state.notes = state.notes.filter((n) => !isTrashed(n));
+      state.selectedId = null;
+      state.editing = false;
+      state.dirty = false;
+      renderAll();
+      toast('Trash emptied.');
+      warnUnrevoked(stillLive);
+    });
+  }
+
+  async function togglePin(id) {
+    const note = getNote(typeof id === 'string' ? id : state.selectedId);
+    if (!note || isTrashed(note)) return;
+    return withBusy('pin', [els.pinToggle], 'Pin update failed.', async () => {
+      const nextNote = { ...note, pinned: !note.pinned, updatedAt: now() };
+      await putNoteRecord(nextNote);
+      Object.assign(note, nextNote);
+      renderAll();
+      toast(note.pinned ? 'Pinned.' : 'Unpinned.');
+    });
+  }
+
+  async function addTagFromInput() {
+    const raw = els.tagInput.value;
+    if (!raw) return;
+    const parts = raw.split(',').map(normalizeTag).filter(Boolean);
+    if (!parts.length) {
+      els.tagInput.value = '';
+      return;
+    }
+    const note = getNote(state.selectedId);
+    if (!note || isTrashed(note)) return;
+    return withBusy('add-tag', [els.tagAddEmpty, els.tagAddPlus], 'Tag update failed.', async () => {
+      const nextNote = {
+        ...note,
+        tags: Array.from(new Set([...(note.tags || []), ...parts])),
+        updatedAt: now(),
+      };
+      await putNoteRecord(nextNote);
+      Object.assign(note, nextNote);
+      els.tagInput.value = '';
+      renderAll();
+    });
+  }
+
+  async function removeTag(tag) {
+    const note = getNote(state.selectedId);
+    if (!note || isTrashed(note)) return;
+    return withBusy('remove-tag', [], 'Tag update failed.', async () => {
+      const nextNote = {
+        ...note,
+        tags: (note.tags || []).filter((t) => t !== tag),
+        updatedAt: now(),
+      };
+      await putNoteRecord(nextNote);
+      Object.assign(note, nextNote);
+      renderAll();
+    });
+  }
+
+  function setTagFilter(tag) {
+    state.tagFilter = tag ? normalizeTag(tag) : null;
+    if (state.tagFilter) {
+      const activeHasTag = activeNotes().some((note) => (note.tags || []).includes(state.tagFilter));
+      const archiveHasTag = archivedNotes().some((note) => (note.tags || []).includes(state.tagFilter));
+      if (state.view === 'trash' || (state.view === 'active' && !activeHasTag && archiveHasTag)) {
+        state.view = activeHasTag ? 'active' : 'archive';
+      } else if (state.view === 'archive' && !archiveHasTag && activeHasTag) {
+        state.view = 'active';
+      }
+    }
+    renderAll();
+  }
+
+  function clearAllFilters() {
+    state.tagFilter = null;
+    state.search = '';
+    els.search.value = '';
+    renderAll();
+  }
+
+  function clearSearchResults() {
+    clearAllFilters();
+    els.search.focus();
+  }
+
+  function toggleBulkMode() {
+    state.bulkMode = !state.bulkMode;
+    state.bulkSelectedIds.clear();
+    renderAll();
+  }
+
+  // Focus mode only swaps which chrome is visible (CSS class + a floating
+  // exit button) — it never touches note content, editing state, or dirty
+  // tracking, so there's nothing to re-render and no risk to drafts or
+  // cross-tab sync.
+  function toggleFocusMode() {
+    state.focusMode = !state.focusMode;
+    applyFocusMode();
+  }
+
+  function applyFocusMode() {
+    document.body.classList.toggle('focus-mode', state.focusMode);
+    els.focusExitBtn.hidden = !state.focusMode;
+    els.focusModeBtn.setAttribute('aria-pressed', state.focusMode ? 'true' : 'false');
+    els.focusModeBtn.classList.toggle('is-active', state.focusMode);
+  }
+
+  function toggleBulkNote(id, selected) {
+    if (selected) state.bulkSelectedIds.add(id);
+    else state.bulkSelectedIds.delete(id);
+    renderAll();
+  }
+
+  function bulkSelectAll(notes) {
+    for (const note of notes || []) state.bulkSelectedIds.add(note.id);
+    renderAll();
+  }
+
+  function bulkClear() {
+    state.bulkSelectedIds.clear();
+    renderAll();
+  }
+
+  async function bulkMoveToTrash() {
+    const selected = selectedBulkNotes().filter((note) => !isTrashed(note));
+    if (!selected.length) return;
+    return withBusy('bulk-move-trash', [], 'Move to Trash failed. Selected notes were not changed.', async () => {
+      // Same contract as the single-note path: trashing takes the share dialog
+      // away, so revoke first. Failed revokes keep their rows for a retry.
+      const stillLive = (await Promise.all(selected.map((note) => revokeSharesForNote(note.id))))
+        .reduce((sum, count) => sum + count, 0);
+      await syncSharedNoteIds();
+      const t = now();
+      const nextNotes = selected.map((note) => ({ ...note, deletedAt: t, updatedAt: t, lastDraftAt: null }));
+      await bulkPutNoteRecords(nextNotes);
+      await Promise.all(nextNotes.map((note) => DB.removeDraft(note.id)));
+      const nextById = new Map(nextNotes.map((note) => [note.id, note]));
+      for (const note of state.notes) {
+        const nextNote = nextById.get(note.id);
+        if (nextNote) Object.assign(note, nextNote);
+      }
+      if (state.selectedId && nextById.has(state.selectedId)) state.selectedId = null;
+      state.bulkSelectedIds.clear();
+      state.bulkMode = false;
+      state.editing = false;
+      state.dirty = false;
+      renderAll();
+      toast('Moved ' + selected.length + ' note' + (selected.length === 1 ? '' : 's') + ' to Trash.');
+      warnUnrevoked(stillLive, 'Restore the affected notes to retry.');
+    });
+  }
+
+  async function bulkRestore() {
+    const selected = selectedBulkNotes().filter(isTrashed);
+    if (!selected.length) return;
+    return withBusy('bulk-restore', [], 'Restore failed. Selected notes are still in Trash.', async () => {
+      const nextNotes = selected.map((note) => ({ ...note, deletedAt: null }));
+      await bulkPutNoteRecords(nextNotes);
+      const nextById = new Map(nextNotes.map((note) => [note.id, note]));
+      for (const note of state.notes) {
+        const nextNote = nextById.get(note.id);
+        if (nextNote) Object.assign(note, nextNote);
+      }
+      state.bulkSelectedIds.clear();
+      state.bulkMode = false;
+      renderAll();
+      toast('Restored ' + selected.length + ' note' + (selected.length === 1 ? '' : 's') + '.');
+    });
+  }
+
+  async function bulkDeleteForever() {
+    const selected = selectedBulkNotes().filter(isTrashed);
+    if (!selected.length) return;
+    if (!(await confirmPermanentDelete(selected.length))) return;
+    return withBusy('bulk-delete-forever', [], 'Permanent delete failed. Selected notes are still in Trash.', async () => {
+      // Deleting forever destroys each share row and with it the only copy of
+      // the revoke token, so the revoke must come first.
+      const stillLive = (await Promise.all(selected.map((note) => revokeSharesForNote(note.id))))
+        .reduce((sum, count) => sum + count, 0);
+      await Promise.all(selected.map((note) => deleteNoteRecord(note.id)));
+      await syncSharedNoteIds();
+      const selectedIds = new Set(selected.map((note) => note.id));
+      state.notes = state.notes.filter((note) => !selectedIds.has(note.id));
+      if (state.selectedId && selectedIds.has(state.selectedId)) state.selectedId = null;
+      state.bulkSelectedIds.clear();
+      state.bulkMode = false;
+      renderAll();
+      toast('Deleted ' + selected.length + ' note' + (selected.length === 1 ? '' : 's') + ' forever.');
+      warnUnrevoked(stillLive);
+    });
+  }
+
+  async function bulkExportJson() {
+    const selected = selectedBulkNotes();
+    if (!selected.length) return;
+    return withBusy('bulk-export-json', [], 'Export failed.', async () => {
+      const selectedIds = new Set(selected.map((note) => note.id));
+      const revisions = (await DB.getAllRevisions())
+        .map((rev) => normalizeRevision(rev, rev.noteId))
+        .filter((rev) => rev && selectedIds.has(rev.noteId));
+      const usedFolderIds = new Set(selected.map((note) => noteFolderId(note)).filter(Boolean));
+      const payload = {
+        app: 'scratchpad',
+        version: window.SCRATCHPAD_VERSION || 'unknown',
+        schemaVersion: 5,
+        exportedAt: new Date().toISOString(),
+        notes: selected.filter((note) => !isTrashed(note)),
+        trashedNotes: selected.filter(isTrashed),
+        revisions,
+        folders: sortedFolders().filter((f) => usedFolderIds.has(f.id)),
+        attachments: window.ScratchpadAttachments ? await window.ScratchpadAttachments.serialize(selectedIds) : [],
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      downloadBlob(blob, `scratchpad-selected-${exportStamp()}.json`);
+      toast('Selected notes exported.');
+    });
+  }
+
+  async function bulkSetArchiveState(shouldArchive) {
+    const selected = selectedBulkNotes().filter((note) =>
+      !isTrashed(note) && isArchived(note) !== shouldArchive
+    );
+    if (!selected.length) return;
+    const previous = new Map(selected.map((note) => [note.id, note.archivedAt]));
+    const nextArchivedAt = shouldArchive ? now() : null;
+    return withBusy('bulk-archive-state', [], 'Archive update failed. Selected notes were not changed.', async () => {
+      const nextNotes = selected.map((note) => ({ ...note, archivedAt: nextArchivedAt }));
+      await bulkPutNoteRecords(nextNotes, 'note-lifecycle-changed');
+      const nextById = new Map(nextNotes.map((note) => [note.id, note]));
+      for (const note of state.notes) {
+        const nextNote = nextById.get(note.id);
+        if (nextNote) Object.assign(note, nextNote);
+      }
+      if (state.selectedId && nextById.has(state.selectedId)) state.selectedId = null;
+      state.bulkSelectedIds.clear();
+      state.bulkMode = false;
+      renderAll();
+      const label = shouldArchive ? 'Archived ' : 'Unarchived ';
+      toast(label + selected.length + ' note' + (selected.length === 1 ? '.' : 's.'), {
+        duration: 8000,
+        actionLabel: 'Undo',
+        action: async () => {
+          const restored = [];
+          for (const [id, archivedAt] of previous) {
+            const stored = await DB.get(id);
+            if (!stored || isTrashed(stored)) continue;
+            restored.push({ ...normalizeNote(stored), archivedAt });
+          }
+          if (restored.length) await bulkPutNoteRecords(restored, 'note-lifecycle-changed');
+          const restoredById = new Map(restored.map((note) => [note.id, note]));
+          for (const note of state.notes) {
+            const restoredNote = restoredById.get(note.id);
+            if (restoredNote) Object.assign(note, restoredNote);
+          }
+          renderAll();
+        },
+      });
+    });
+  }
+
+  function openBulkTagDialog() {
+    if (!selectedBulkNotes().filter((note) => !isTrashed(note)).length) return;
+    els.bulkTagInput.value = '';
+    openDialog(els.bulkTagDialog);
+    setTimeout(() => els.bulkTagInput.focus(), 0);
+  }
+
+  async function applyBulkTag() {
+    const tags = els.bulkTagInput.value.split(',').map(normalizeTag).filter(Boolean);
+    if (!tags.length) return;
+    const selected = selectedBulkNotes().filter((note) => !isTrashed(note));
+    if (!selected.length) return;
+    return withBusy('bulk-tag', [els.bulkApplyTag], 'Tag update failed.', async () => {
+      const t = now();
+      const nextNotes = selected.map((note) => ({
+        ...note,
+        tags: Array.from(new Set([...(note.tags || []), ...tags])),
+        updatedAt: t,
+      }));
+      await bulkPutNoteRecords(nextNotes);
+      const nextById = new Map(nextNotes.map((note) => [note.id, note]));
+      for (const note of state.notes) {
+        const nextNote = nextById.get(note.id);
+        if (nextNote) Object.assign(note, nextNote);
+      }
+      closeDialog(els.bulkTagDialog);
+      renderAll();
+      toast('Tag added to ' + selected.length + ' note' + (selected.length === 1 ? '' : 's') + '.');
+    });
+  }
+
+  // -------- Drafts --------
+  async function persistDraftNow() {
+    // A debounced write can fire mid-save; landing after the save's draft
+    // removal would resurface the saved text as "unsaved edits" later.
+    if (!state.editing || !state.selectedId || state.busy.has('save')) return;
+    const note = getNote(state.selectedId);
+    if (!note || isTrashed(note)) return;
+    const updatedAt = now();
+    try {
+      await DB.putDraft({
+        noteId: note.id,
+        title: els.titleInput.value.trim(),
+        body: els.editor.value,
+        updatedAt,
+      });
+    } catch (e) {
+      console.warn('Draft persistence failed', e);
+    }
+  }
+
+  const persistDraftDebounced = debounce(persistDraftNow, DRAFT_DEBOUNCE_MS);
+
+  async function discardCurrentDraft() {
+    const note = getNote(state.selectedId);
+    if (!note) return;
+    await DB.removeDraft(note.id);
+  }
+
+  async function maybePromptDraftForSelected() {
+    const note = getNote(state.selectedId);
+    if (!note || isTrashed(note) || state.editing || state.promptedDrafts.has(note.id)) return;
+    const draft = await DB.getDraft(note.id);
+    if (!draft || !Number.isFinite(draft.updatedAt) || draft.updatedAt <= note.updatedAt) return;
+    state.promptedDrafts.add(note.id);
+    els.draftDialogCopy.textContent =
+      'Scratchpad found unsaved edits from ' + formatFullTimestamp(draft.updatedAt) + ' that are newer than the saved note.';
+    openDialog(els.draftDialog);
+    const decision = await waitForDraftDecision();
+    if (decision === 'restore') {
+      state.view = 'active';
+      state.selectedId = note.id;
+      state.editing = true;
+      state.dirty = true;
+      renderEditor();
+      els.titleInput.value = draft.title || '';
+      els.editor.value = draft.body || '';
+      els.dirtyIndicator.hidden = false;
+      window.ScratchpadFind.editorFocus(els.editor);
+    } else if (decision === 'discard') {
+      await DB.removeDraft(note.id);
+      renderAll();
+    } else {
+      state.promptedDrafts.delete(note.id);
+    }
+  }
+
+  function waitForDraftDecision() {
+    return new Promise((resolve) => {
+      let decided = null;
+      const onRestore = () => {
+        decided = 'restore';
+        closeDialog(els.draftDialog);
+      };
+      const onDiscard = () => {
+        decided = 'discard';
+        closeDialog(els.draftDialog);
+      };
+      const onClose = () => {
+        els.restoreDraft.removeEventListener('click', onRestore);
+        els.discardDraft.removeEventListener('click', onDiscard);
+        resolve(decided);
+      };
+      els.restoreDraft.addEventListener('click', onRestore, { once: true });
+      els.discardDraft.addEventListener('click', onDiscard, { once: true });
+      els.draftDialog.addEventListener('close', onClose, { once: true });
+    });
+  }
+
+  function markDirty() {
+    if (!state.editing) return;
+    const wasDirty = state.dirty;
+    state.dirty = true;
+    els.dirtyIndicator.hidden = false;
+    els.discardOverflowBtn.hidden = false;
+    if (wasDirty) persistDraftDebounced();
+    else persistDraftNow();
+  }
+
+  async function handleTitleInput() {
+    if (state.editing) {
+      markDirty();
+      return;
+    }
+    state.dirty = true;
+    els.dirtyIndicator.hidden = false;
+  }
+
+  function applyEditorFormat(format) {
+    if (!state.editing || !els.editor || els.editor.hidden) return;
+    window.ScratchpadFormat.apply(els.editor, format);
+  }
+
+  // -------- Dialogs --------
+  function openDialog(dialog) {
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', '');
+  }
+
+  function closeDialog(dialog) {
+    if (dialog === els.commandPaletteDialog) {
+      els.commandPaletteInput.setAttribute('aria-expanded', 'false');
+      els.commandPaletteInput.removeAttribute('aria-activedescendant');
+    }
+    if (typeof dialog.close === 'function') dialog.close();
+    else dialog.removeAttribute('open');
+  }
+
+  function bindDialogClosers() {
+    for (const btn of document.querySelectorAll('[data-dialog-close]')) {
+      btn.addEventListener('click', () => {
+        const dlg = btn.closest('dialog');
+        if (dlg) closeDialog(dlg);
+      });
+    }
+  }
+
+  // -------- Programmatic note mutations --------
+  // Save path for writes that do not originate in the editor (task toggles,
+  // quick capture, link-rename rewrites). Reads the latest record from
+  // IndexedDB — never in-memory state — and writes through putNoteRecord so
+  // cross-tab behavior matches a manual save.
+  const TOGGLE_REVISION_WINDOW_MS = 5 * 60 * 1000;
+  const toggleRevisionAt = new Map();
+
+  async function mutateNoteBody(noteId, transform, opts) {
+    opts = opts || {};
+    // Retried because the read and the write are separate transactions --
+    // storeRevision alone adds two more in between -- and a write committed
+    // by another tab in that gap would be clobbered wholesale by the stale
+    // {...latest} snapshot, every field of it, with nothing to show for it.
+    // The conditional put detects the conflict; the transform then re-runs
+    // against the newer record.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const latestRaw = await DB.get(noteId);
+      if (!latestRaw) return null;
+      const latest = normalizeNote(latestRaw);
+      if (isTrashed(latest)) return null;
+      const nextBody = transform(latest.body || '');
+      if (typeof nextBody !== 'string' || nextBody === latest.body) return latest;
+      let snapshot = true;
+      if (opts.coalesceToggles) {
+        const last = toggleRevisionAt.get(noteId) || 0;
+        if (now() - last < TOGGLE_REVISION_WINDOW_MS) snapshot = false;
+        else toggleRevisionAt.set(noteId, now());
+      }
+      if (snapshot) await storeRevision(latest);
+      const nextNote = { ...latest, body: nextBody, updatedAt: nextUpdatedAt(latest) };
+      if (!(await DB.putIfUnchanged(nextNote, latestRaw.updatedAt))) continue;
+      broadcastChange({ type: 'note-changed', noteId: nextNote.id, updatedAt: nextNote.updatedAt });
+      const index = state.notes.findIndex((n) => n.id === noteId);
+      if (index >= 0) state.notes[index] = nextNote;
+      else state.notes.push(nextNote);
+      return nextNote;
+    }
+    return null;
+  }
+
+  // -------- Swipe actions (touch) --------
+  // swipe-row.js owns the gesture. Trash, bulk mode, and search rows opt out.
+  function swipeSidesFor(row) {
+    const note = getNote(row.getAttribute('data-id'));
+    if (!note || isTrashed(note) || state.bulkMode || state.search.trim()) return null;
+    const archived = isArchived(note);
+    const lifecycle = archived
+      ? { id: 'unarchive', label: 'Unarchive', full: true, exits: true }
+      : { id: 'archive', label: 'Archive', full: true, exits: true };
+    return {
+      leading: archived ? [] : [{ id: 'pin', label: note.pinned ? 'Unpin' : 'Pin', full: true }],
+      trailing: [lifecycle, { id: 'trash', label: 'Trash', danger: true }],
+    };
+  }
+
+  // The bulk paths already stay in the current view, revoke live shares before
+  // trashing, and raise Undo for Archive, so a swipe runs them on one id. They
+  // also reset the editing state, which would drop an unsaved draft.
+  function runSwipeAction(id, action) {
+    if (state.editing && state.dirty) return toast('Save or discard your edits first.', { tone: 'info' });
+    if (action === 'pin') return togglePin(id);
+    state.bulkSelectedIds.clear();
+    state.bulkSelectedIds.add(id);
+    return action === 'trash' ? bulkMoveToTrash() : bulkSetArchiveState(action === 'archive');
+  }
+
+  // -------- Task toggles --------
+  // Rendered task checkboxes are interactive only when the scanner agrees
+  // with what marked rendered; any count mismatch marks them inert so a
+  // click can never flip the wrong line.
+  function syncTaskCheckboxes(note) {
+    const boxes = els.rendered.querySelectorAll('.task-checkbox');
+    if (!boxes.length) return;
+    const markers = Markdown.findTaskMarkers(note.body || '');
+    const interactive = markers.length === boxes.length && !isTrashed(note);
+    for (const box of boxes) {
+      box.setAttribute('aria-disabled', interactive ? 'false' : 'true');
+      if (!interactive) box.setAttribute('tabindex', '-1');
+    }
+  }
+
+  async function toggleTaskAt(index) {
+    const note = getNote(state.selectedId);
+    if (!note || isTrashed(note) || state.editing) return;
+    const updated = await withBusy('task-toggle', [], 'Could not update the task.', () =>
+      mutateNoteBody(note.id, (body) => {
+        const markers = Markdown.findTaskMarkers(body);
+        const marker = markers[index];
+        if (!marker) return body;
+        const next = body.charAt(marker.offset) === ' ' ? 'x' : ' ';
+        return body.slice(0, marker.offset) + next + body.slice(marker.offset + 1);
+      }, { coalesceToggles: true }));
+    if (!updated) return;
+    renderAll();
+    // The render replaced every checkbox, so mark the new one for its tick.
+    const box = els.rendered.querySelectorAll('.task-checkbox')[index];
+    if (box) box.classList.add('is-just-toggled');
+  }
+
+  function taskCheckboxIndex(target) {
+    const box = target.closest && target.closest('.task-checkbox');
+    if (!box || box.getAttribute('aria-disabled') === 'true') return -1;
+    return Array.prototype.indexOf.call(els.rendered.querySelectorAll('.task-checkbox'), box);
+  }
+
+  // -------- Wikilink navigation --------
+  async function createNoteFromWikilink(title) {
+    if (state.editing && state.dirty) {
+      const ok = await confirmDiscard();
+      if (!ok) return;
+      await discardCurrentDraft();
+    }
+    const t = now();
+    const note = normalizeNote({
+      id: uuid(),
+      title,
+      body: '',
+      tags: [],
+      pinned: false,
+      createdAt: t,
+      updatedAt: t,
+      deletedAt: null,
+      lastDraftAt: null,
+    });
+    await withBusy('create-from-wikilink', [], 'Could not create the linked note.', async () => {
+      await putNoteRecord(note);
+      state.view = 'active';
+      state.notes.push(note);
+      state.selectedId = note.id;
+      state.editing = true;
+      state.dirty = false;
+      renderAll();
+      state.mobileView = 'editor';
+      syncMobileView();
+      window.ScratchpadFind.editorFocus(els.editor);
+    });
+  }
+
+  function wikilinkHrefParts(target) {
+    const link = target.closest && target.closest('a.wikilink');
+    if (!link) return null;
+    const href = link.getAttribute('href') || '';
+    if (href.startsWith('#note:')) return { kind: 'note', value: decodeURIComponent(href.slice(6)) };
+    if (href.startsWith('#new:')) return { kind: 'new', value: decodeURIComponent(href.slice(5)) };
+    return null;
+  }
+
+  function onRenderedClick(e) {
+    const parts = wikilinkHrefParts(e.target);
+    if (parts) {
+      e.preventDefault();
+      if (parts.kind === 'note') openNoteFromCommand(parts.value);
+      else createNoteFromWikilink(parts.value);
+      return;
+    }
+    const index = taskCheckboxIndex(e.target);
+    if (index >= 0) {
+      e.preventDefault();
+      toggleTaskAt(index);
+    }
+  }
+
+  function onRenderedKey(e) {
+    if (e.key !== ' ' && e.key !== 'Enter') return;
+    const index = taskCheckboxIndex(e.target);
+    if (index >= 0) {
+      e.preventDefault();
+      toggleTaskAt(index);
+    }
+  }
+
+  // -------- Backlinks --------
+  // Computed from note bodies on every render — nothing persisted, so Trash
+  // restores and imports can never leave a stale index. O(total body text)
+  // per view is fine at local scale.
+  function linkingNotesTo(title, excludeId) {
+    const wanted = (title || '').trim().toLowerCase();
+    if (!wanted) return [];
+    return sortNotes(state.notes.filter((n) => {
+      if (n.id === excludeId || isTrashed(n)) return false;
+      return Markdown.extractWikilinkTargets(n.body || '').some((t) => t.toLowerCase() === wanted);
+    }));
+  }
+
+  function renderBacklinks(note) {
+    const show = note && !isTrashed(note) && !state.editing;
+    const sources = show ? linkingNotesTo(deriveTitle(note), note.id) : [];
+    els.backlinksSection.hidden = !sources.length;
+    els.backlinksSummary.textContent = 'Linked from ' + sources.length + ' note' + (sources.length === 1 ? '' : 's');
+    els.backlinksList.replaceChildren(...sources.map((source) => el('li', {
+      children: [el('button', {
+        class: 'backlink-btn',
+        text: deriveTitle(source) + (isArchived(source) ? ' · Archived' : ''),
+        attrs: { type: 'button' },
+        on: { click: () => openNoteFromCommand(source.id) },
+      })],
+    })));
+  }
+
+  // -------- Wikilink autocomplete --------
+  // Opens while the caret sits inside an unclosed [[… run on one line.
+  // Caret pixel position comes from a throwaway mirror div that copies the
+  // textarea's text metrics; if that ever misbehaves the panel still works,
+  // it just anchors slightly off — selection state, not geometry, is the
+  // source of truth for insertion.
+  const wikilinkSuggestState = { open: false, items: [], index: 0, start: 0 };
+
+  function wikilinkQueryAt(value, caret) {
+    const open = value.lastIndexOf('[[', caret - 1);
+    if (open === -1) return null;
+    const between = value.slice(open + 2, caret);
+    if (/[\n\]|]/.test(between)) return null;
+    return { start: open + 2, query: between };
+  }
+
+  function wikilinkSuggestions(query) {
+    const q = Search.normalize(query);
+    const current = state.selectedId;
+    return sortNotes(state.notes.filter((n) => {
+      if (n.id === current || isTrashed(n)) return false;
+      return !q || Search.normalize(deriveTitle(n)).includes(q);
+    })).slice(0, 8);
+  }
+
+  function caretPixelPosition(textarea, caret) {
+    const mirror = el('div');
+    const style = window.getComputedStyle(textarea);
+    for (const prop of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing',
+      'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth',
+      'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'boxSizing', 'whiteSpace',
+      'overflowWrap', 'tabSize']) {
+      mirror.style[prop] = style[prop];
+    }
+    mirror.style.position = 'absolute';
+    mirror.style.visibility = 'hidden';
+    mirror.style.whiteSpace = 'pre-wrap';
+    mirror.style.overflowWrap = 'break-word';
+    mirror.style.width = textarea.clientWidth + 'px';
+    mirror.textContent = textarea.value.slice(0, caret);
+    const marker = el('span', { text: '​' });
+    mirror.appendChild(marker);
+    textarea.parentElement.appendChild(mirror);
+    const top = marker.offsetTop - textarea.scrollTop;
+    const left = marker.offsetLeft;
+    mirror.remove();
+    return { top: textarea.offsetTop + top, left: textarea.offsetLeft + left };
+  }
+
+  function closeWikilinkSuggest() {
+    wikilinkSuggestState.open = false;
+    els.wikilinkSuggest.hidden = true;
+    els.wikilinkSuggest.replaceChildren();
+  }
+
+  function renderWikilinkSuggest() {
+    const items = wikilinkSuggestState.items;
+    if (!items.length) {
+      closeWikilinkSuggest();
+      return;
+    }
+    els.wikilinkSuggest.replaceChildren(...items.map((note, index) => el('button', {
+      class: 'wikilink-option',
+      text: deriveTitle(note) + (isArchived(note) ? ' — Archived' : ''),
+      attrs: {
+        type: 'button',
+        role: 'option',
+        'aria-selected': index === wikilinkSuggestState.index ? 'true' : 'false',
+      },
+      on: {
+        mousedown: (e) => e.preventDefault(), // keep editor focus
+        click: () => insertWikilinkSuggestion(index),
+      },
+    })));
+    els.wikilinkSuggest.hidden = false;
+  }
+
+  function updateWikilinkSuggest() {
+    if (!state.editing || els.editor.hidden) {
+      closeWikilinkSuggest();
+      return;
+    }
+    const caret = els.editor.selectionStart;
+    const found = wikilinkQueryAt(els.editor.value, caret);
+    if (!found) {
+      closeWikilinkSuggest();
+      return;
+    }
+    wikilinkSuggestState.open = true;
+    wikilinkSuggestState.start = found.start;
+    wikilinkSuggestState.index = 0;
+    wikilinkSuggestState.items = wikilinkSuggestions(found.query);
+    const pos = caretPixelPosition(els.editor, caret);
+    els.wikilinkSuggest.style.top = (pos.top + 24) + 'px';
+    els.wikilinkSuggest.style.left = Math.max(0, Math.min(pos.left, els.editor.clientWidth - 200)) + 'px';
+    renderWikilinkSuggest();
+  }
+
+  function insertWikilinkSuggestion(index) {
+    const note = wikilinkSuggestState.items[index];
+    if (!note) return;
+    const caret = els.editor.selectionStart;
+    els.editor.setRangeText(deriveTitle(note) + ']]', wikilinkSuggestState.start, caret, 'end');
+    closeWikilinkSuggest();
+    els.editor.focus();
+    els.editor.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function onEditorSuggestKey(e) {
+    if (!wikilinkSuggestState.open) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      wikilinkSuggestState.index = Math.min(wikilinkSuggestState.items.length - 1, wikilinkSuggestState.index + 1);
+      renderWikilinkSuggest();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      wikilinkSuggestState.index = Math.max(0, wikilinkSuggestState.index - 1);
+      renderWikilinkSuggest();
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      insertWikilinkSuggestion(wikilinkSuggestState.index);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation(); // do not let Escape exit edit mode while the panel is open
+      closeWikilinkSuggest();
+    }
+  }
+
+  // -------- Rename-safe links --------
+  function replaceWikilinkTargets(body, oldTitle, newTitle) {
+    const escaped = oldTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp('\\[\\[\\s*' + escaped + '\\s*(\\|[^\\[\\]\\n]*)?\\]\\]', 'gi');
+    return body.replace(pattern, (match, alias) => '[[' + newTitle + (alias || '') + ']]');
+  }
+
+  // Called after a title change is persisted. Non-blocking: the save already
+  // happened; this only offers to keep other notes' links pointing here.
+  async function maybeOfferLinkRewrite(oldTitle, newTitle, noteId) {
+    const oldT = (oldTitle || '').trim();
+    const newT = (newTitle || '').trim();
+    if (!oldT || !newT || oldT.toLowerCase() === newT.toLowerCase()) return;
+    const sources = linkingNotesTo(oldT, noteId);
+    if (!sources.length) return;
+    els.linkRenameCopy.textContent =
+      sources.length + ' note' + (sources.length === 1 ? '' : 's') +
+      ' link' + (sources.length === 1 ? 's' : '') + ' to "' + oldT + '". Update them to "' + newT + '"?';
+    openDialog(els.linkRenameDialog);
+    const confirmed = await new Promise((resolve) => {
+      let decided = false;
+      const onConfirm = () => { decided = true; closeDialog(els.linkRenameDialog); };
+      const onClose = () => {
+        els.confirmLinkRename.removeEventListener('click', onConfirm);
+        resolve(decided);
+      };
+      els.confirmLinkRename.addEventListener('click', onConfirm, { once: true });
+      els.linkRenameDialog.addEventListener('close', onClose, { once: true });
+    });
+    if (!confirmed) return;
+    await withBusy('link-rename', [], 'Link update failed. The rename itself was saved.', async () => {
+      for (const source of sources) {
+        await mutateNoteBody(source.id, (body) => replaceWikilinkTargets(body, oldT, newT));
+      }
+      renderAll();
+      toast('Updated links in ' + sources.length + ' note' + (sources.length === 1 ? '' : 's') + '.');
+    });
+  }
+
+  // -------- Daily note --------
+  // Identity lives in the dailyDate field (local YYYY-MM-DD), not the title,
+  // so users can rename daily notes freely. A note titled "Daily template"
+  // customizes the seed body without any settings UI.
+  const DAILY_DEFAULT_BODY = '## Tasks\n\n## Notes\n';
+
+  function todayKey() {
+    return localDateKey(new Date());
+  }
+
+  function findDailyNote(key) {
+    return sortNotes(state.notes.filter((n) => !isTrashed(n) && n.dailyDate === key))[0] || null;
+  }
+
+  function findDailyTemplate() {
+    return activeNotes().find((n) => (n.title || '').trim().toLowerCase() === 'daily template') || null;
+  }
+
+  async function createDailyNote(dateKey) {
+    const t = now();
+    const key = dateKey || todayKey();
+    const date = localDateFromKey(key) || new Date();
+    const template = findDailyTemplate();
+    const folder = await ensureDailyNotesFolder();
+    const note = normalizeNote({
+      id: uuid(),
+      title: date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }),
+      body: template ? (template.body || '') : DAILY_DEFAULT_BODY,
+      tags: ['daily'],
+      pinned: false,
+      folderId: folder.id,
+      createdAt: t,
+      updatedAt: t,
+      deletedAt: null,
+      lastDraftAt: null,
+      dailyDate: key,
+    });
+    await putNoteRecord(note);
+    state.notes.push(note);
+    return note;
+  }
+
+  // -------- Quick capture --------
+  function openQuickCapture() {
+    els.quickCaptureInput.value = '';
+    updateCapturePreview();
+    openDialog(els.quickCaptureDialog);
+    setTimeout(() => els.quickCaptureInput.focus(), 0);
+  }
+
+  function editingTodayNote() {
+    const target = findDailyNote(todayKey());
+    return !!(target && state.selectedId === target.id && state.editing);
+  }
+
+  function updateCapturePreview() {
+    els.quickCaptureDestination.textContent = editingTodayNote() ? 'Today’s draft' : 'Today’s note';
+    const stamp = window.ScratchpadDialogs.captureTimestamp();
+    els.quickCapturePreview.replaceChildren(
+      ...window.ScratchpadDialogs.capturePreview(stamp, els.quickCaptureInput.value.trim())
+    );
+  }
+
+  async function submitQuickCapture() {
+    const text = els.quickCaptureInput.value.trim();
+    closeDialog(els.quickCaptureDialog);
+    if (!text) return;
+    const line = '- **' + window.ScratchpadDialogs.captureTimestamp() + '** ' + text;
+    // Today's note open in this tab's editor: append to the live buffer so
+    // capture can never race the user's own unsaved edits.
+    if (editingTodayNote()) {
+      els.editor.value = window.ScratchpadDialogs.appendCaptureLine(els.editor.value, line);
+      els.editor.dispatchEvent(new Event('input', { bubbles: true }));
+      toast("Added to today’s draft.");
+      return;
+    }
+    await withBusy('quick-capture', [], 'Capture failed. Your note was not changed.', async () => {
+      const note = findDailyNote(todayKey()) || await createDailyNote();
+      await mutateNoteBody(note.id, (body) => window.ScratchpadDialogs.appendCaptureLine(body, line));
+      renderAll();
+      toast("Captured to today’s note.");
+    });
+  }
+
+  async function openDailyNote(dateKey, trigger) {
+    const key = dateKey || todayKey();
+    const existing = findDailyNote(key);
+    if (existing) {
+      await openNoteFromCommand(existing.id);
+      return existing;
+    }
+    if (state.editing && state.dirty) {
+      const ok = await confirmDiscard();
+      if (!ok) return null;
+      await discardCurrentDraft();
+    }
+    const controls = [trigger];
+    if (key === todayKey()) controls.push(els.todayNote);
+    return withBusy('open-daily-' + key, controls.filter(Boolean), 'Could not open that daily note.', async () => {
+      const note = await createDailyNote(key);
+      state.view = 'active';
+      state.selectedId = note.id;
+      state.editing = false;
+      state.dirty = false;
+      state.mobileView = 'editor';
+      renderAll();
+      syncMobileView();
+      return note;
+    });
+  }
+
+  async function openTodayNote() {
+    return openDailyNote(todayKey(), els.todayNote);
+  }
+
+  // -------- Monthly review --------
+  // A review is an ordinary movable note with stable month identity. Its body
+  // starts as a user-owned reflection scaffold plus links; daily-note content
+  // is never copied or synchronized into it.
+  function previousMonthKey() {
+    const today = new Date();
+    const previous = new Date(today.getFullYear(), today.getMonth() - 1, 1, 12);
+    return localDateKey(previous).slice(0, 7);
+  }
+
+  function monthlyReviewTargetMonth() {
+    const selected = getNote(state.selectedId);
+    if (selected && selected.dailyDate) return selected.dailyDate.slice(0, 7);
+    if (selected && selected.monthlyReviewMonth) return selected.monthlyReviewMonth;
+    return previousMonthKey();
+  }
+
+  function findMonthlyReview(monthKey) {
+    return sortNotes(state.notes.filter((note) =>
+      !isTrashed(note) && note.monthlyReviewMonth === monthKey
+    ))[0] || null;
+  }
+
+  function monthlyReviewTitle(monthKey) {
+    return 'Monthly Review — ' + monthLabel(monthKey);
+  }
+
+  function monthlyReviewLink(note) {
+    const date = localDateFromKey(note.dailyDate);
+    const alias = date
+      ? date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' · ' +
+        date.toLocaleDateString([], { weekday: 'short' })
+      : note.dailyDate;
+    return '- [[' + deriveTitle(note) + '|' + alias + ']]';
+  }
+
+  function monthlyReviewBody(monthKey) {
+    const dailyLinks = preservedNotes()
+      .filter((note) => note.dailyDate && note.dailyDate.startsWith(monthKey + '-'))
+      .sort((a, b) => a.dailyDate.localeCompare(b.dailyDate))
+      .map(monthlyReviewLink);
+    return [
+      '## Highlights',
+      '',
+      '## Decisions',
+      '',
+      '## Open loops',
+      '',
+      '## Next month',
+      '',
+      '## Daily notes',
+      '',
+      ...dailyLinks,
+      '',
+    ].join('\n');
+  }
+
+  async function createMonthlyReview(monthKey) {
+    const t = now();
+    const note = normalizeNote({
+      id: uuid(),
+      title: monthlyReviewTitle(monthKey),
+      body: monthlyReviewBody(monthKey),
+      tags: ['monthly-review'],
+      pinned: false,
+      folderId: null,
+      createdAt: t,
+      updatedAt: t,
+      archivedAt: null,
+      deletedAt: null,
+      lastDraftAt: null,
+      dailyDate: null,
+      monthlyReviewMonth: monthKey,
+    });
+    await putNoteRecord(note);
+    state.notes.push(note);
+    return note;
+  }
+
+  async function openMonthlyReview(monthKey) {
+    const existing = findMonthlyReview(monthKey);
+    if (existing) return openNoteFromCommand(existing.id);
+    if (state.editing && state.dirty) {
+      const ok = await confirmDiscard();
+      if (!ok) return null;
+      await discardCurrentDraft();
+    }
+    return withBusy('monthly-review-' + monthKey, [], 'Could not create that monthly review.', async () => {
+      const note = await createMonthlyReview(monthKey);
+      state.view = 'active';
+      state.selectedId = note.id;
+      state.editing = true;
+      state.dirty = false;
+      state.mobileView = 'editor';
+      renderAll();
+      syncMobileView();
+      window.ScratchpadFind.editorFocus(els.editor);
+      return note;
+    });
+  }
+
+  function openEraseLocalDataDialog() {
+    closeDialog(els.aboutDialog);
+    els.eraseConfirmation.value = '';
+    els.confirmEraseLocalData.disabled = true;
+    openDialog(els.eraseLocalDataDialog);
+    setTimeout(() => els.eraseConfirmation.focus(), 0);
+  }
+
+  async function eraseLocalData() {
+    // Unreachable through the UI (the button is gated), kept as the last
+    // guard in front of an irreversible wipe.
+    if (els.eraseConfirmation.value !== 'ERASE') return;
+    return withBusy('erase-local-data', [els.confirmEraseLocalData], 'Local data could not be erased.', async () => {
+      // The shares store holds the only copy of every link's revoke token, so
+      // this is the last possible moment to take the published copies down.
+      // Best effort -- but if any link survives, the user decides whether to
+      // destroy the tokens anyway, because after the wipe no one can revoke.
+      let shares = [];
+      try {
+        shares = await DB.getAllShares();
+      } catch { /* the erase itself still proceeds */ }
+      let stillLive = 0;
+      for (const share of shares) {
+        try {
+          if (!(await revokeShare(share))) stillLive += 1;
+        } catch {
+          stillLive += 1;
+        }
+      }
+      if (stillLive) {
+        const what = stillLive === 1 ? '1 share link' : stillLive + ' share links';
+        els.eraseSharesCopy.textContent =
+          what + ' could not be revoked and will stay live until expiry. ' +
+          'Erasing local data destroys the only copy of the revoke tokens, so ' +
+          'the links can never be taken down early.';
+        closeDialog(els.eraseLocalDataDialog);
+        if (!(await confirmWith(els.eraseSharesDialog, els.confirmEraseAnyway))) return;
+      }
+      await DB.clearAllStores();
+      const appKeys = [];
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('scratchpad:') || key === 'scratchpad-visited' || key === 'theme-preview')) {
+          appKeys.push(key);
+        }
+      }
+      for (const key of appKeys) localStorage.removeItem(key);
+      sessionStorage.setItem('scratchpad:eraseComplete', '1');
+      broadcastChange({ type: 'reset' });
+      window.location.replace('about.html');
+    });
+  }
+
+  function confirmWith(dialog, button) {
+    return window.ScratchpadDialogs.confirmDialog(dialog, button, openDialog, closeDialog);
+  }
+
+  function confirmDiscard() {
+    return confirmWith(els.discardDialog, els.confirmDiscard);
+  }
+
+  // One dialog serves the single-note and bulk paths; the copy names the count.
+  function confirmPermanentDelete(count) {
+    const many = count !== 1;
+    els.permanentDeleteTitle.textContent = many
+      ? 'Permanently delete ' + count + ' notes?'
+      : 'Permanently delete this note?';
+    els.permanentDeleteCopy.textContent = many
+      ? 'This removes ' + count + ' notes, their drafts, and their revision history from this browser.'
+      : 'This removes the note, its draft, and its revision history from this browser.';
+    return confirmWith(els.permanentDeleteDialog, els.confirmPermanentDelete);
+  }
+
+  function readStoredTime(key) {
+    try {
+      const value = Number(localStorage.getItem(key));
+      return Number.isFinite(value) && value > 0 ? value : null;
+    } catch (e) {
+      return null; /* private mode / blocked storage */
+    }
+  }
+
+  function writeStoredTime(key, value) {
+    try {
+      localStorage.setItem(key, String(value));
+    } catch (e) { /* private mode / quota */ }
+  }
+
+  function lastBackupAt() {
+    return readStoredTime(LAST_BACKUP_KEY);
+  }
+
+  function formatBackupStatus(ms) {
+    if (!ms) return 'No backup recorded';
+    return 'Last backup ' + formatFullTimestamp(ms);
+  }
+
+  function formatDaysAgo(elapsedMs) {
+    const days = Math.floor(elapsedMs / DAY_MS);
+    if (days <= 0) return 'today';
+    if (days === 1) return 'yesterday';
+    return days + ' days ago';
+  }
+
+  function renderBackupChip() {
+    if (!els.backupChip) return;
+    const last = lastBackupAt();
+    const elapsed = last ? now() - last : null;
+    let backupState = 'missing';
+    let label = 'Never backed up. Export now.';
+    if (last && elapsed <= BACKUP_HEALTHY_MS) {
+      backupState = 'healthy';
+      label = 'Backed up ' + formatDaysAgo(elapsed);
+    } else if (last && elapsed <= BACKUP_AGING_MS) {
+      backupState = 'aging';
+      label = 'Last backup ' + formatDaysAgo(elapsed);
+    }
+    els.backupChip.dataset.backupState = backupState;
+    els.backupChipLabel.textContent = label;
+  }
+
+  async function renderBackupMenuMeta() {
+    if (!els.backupMenuMeta) return;
+    const count = preservedNotes().length;
+    const parts = [count === 1 ? '1 note' : count + ' notes'];
+    if (navigator.storage && typeof navigator.storage.estimate === 'function') {
+      try {
+        const estimate = await navigator.storage.estimate();
+        parts.push(formatBytes(estimate.usage || 0));
+      } catch (e) { /* size stays out of the line */ }
+    }
+    const protection = await storageProtectionStatus();
+    if (protection === 'Persistent') parts.push('storage protected');
+    else if (protection === 'Best effort') parts.push('best-effort storage');
+    els.backupMenuMeta.textContent = parts.join(' · ');
+  }
+
+  function recordBackupDownload() {
+    writeStoredTime(LAST_BACKUP_KEY, now());
+    try {
+      localStorage.removeItem(BACKUP_SNOOZE_KEY);
+    } catch (e) { /* private mode / blocked storage */ }
+    renderBackupChip();
+    renderDiagnostics();
+  }
+
+  function formatBytes(bytes) {
+    if (!Number.isFinite(bytes)) return 'Unavailable';
+    if (bytes < 1024) return Math.round(bytes) + ' B';
+    const units = ['KB', 'MB', 'GB'];
+    let value = bytes / 1024;
+    let unit = units[0];
+    for (let i = 1; i < units.length && value >= 1024; i += 1) {
+      value /= 1024;
+      unit = units[i];
+    }
+    return value.toFixed(value >= 10 ? 0 : 1) + ' ' + unit;
+  }
+
+  async function storageProtectionStatus() {
+    if (!navigator.storage || typeof navigator.storage.persisted !== 'function') return 'Unavailable';
+    try {
+      return (await navigator.storage.persisted()) ? 'Persistent' : 'Best effort';
+    } catch (e) {
+      return 'Unavailable';
+    }
+  }
+
+  async function renderStorageProtection() {
+    const status = await storageProtectionStatus();
+    els.diagnosticStorageProtection.textContent = status;
+    els.protectStorageBtn.hidden = status !== 'Best effort' ||
+      !navigator.storage || typeof navigator.storage.persist !== 'function';
+    return status;
+  }
+
+  async function requestStorageProtection() {
+    if (!navigator.storage || typeof navigator.storage.persist !== 'function') return;
+    return withBusy('storage-protection', [els.protectStorageBtn], 'Storage protection could not be requested.', async () => {
+      let granted = false;
+      try {
+        granted = await navigator.storage.persist();
+      } catch (e) {
+        granted = false;
+      }
+      els.diagnosticStorageProtection.textContent = granted ? 'Persistent' : 'Best effort';
+      els.protectStorageBtn.hidden = granted;
+      syncDataStatusRows();
+      toast(
+        granted ? 'Local data protection is on.' : 'Protection was not granted. Keep exporting backups.',
+        { tone: granted ? 'success' : 'info' }
+      );
+    });
+  }
+
+  async function renderDiagnostics() {
+    if (!els.diagnosticActiveNotes) return;
+    els.diagnosticActiveNotes.textContent = String(activeNotes().length);
+    els.diagnosticArchivedNotes.textContent = String(archivedNotes().length);
+    els.diagnosticTrashedNotes.textContent = String(trashedNotes().length);
+    els.diagnosticStorage.textContent = 'Checking...';
+    try {
+      const [revisions, drafts, storage] = await Promise.all([
+        DB.getAllRevisions(),
+        DB.getAllDrafts(),
+        window.ScratchpadSettings.storageSummary(formatBytes),
+      ]);
+      els.diagnosticRevisions.textContent = String(revisions.length);
+      els.diagnosticDrafts.textContent = String(drafts.length);
+      els.diagnosticStorage.textContent = storage;
+    } catch (e) {
+      els.diagnosticRevisions.textContent = 'Unavailable';
+      els.diagnosticDrafts.textContent = 'Unavailable';
+      els.diagnosticStorage.textContent = 'Unavailable';
+    }
+    await renderStorageProtection();
+    els.diagnosticLastBackup.textContent = formatBackupStatus(lastBackupAt());
+    els.diagnosticOfflineCache.textContent = window.ScratchpadSettings.offlineCacheStatus();
+    syncDataStatusRows();
+  }
+
+  function syncDataStatusRows() {
+    for (const row of document.querySelectorAll('.data-status-row')) {
+      const value = row.querySelector('.data-status-value');
+      row.dataset.state = window.ScratchpadDialogs.statusState(value ? value.textContent : '');
+    }
+  }
+
+  function openAboutDialog() {
+    openDialog(els.aboutDialog);
+  }
+
+  let syncSettingsChoices = () => {};
+
+  function openSettingsDialog() {
+    syncSettingsChoices();
+    renderDiagnostics();
+    openDialog(els.settingsDialog);
+  }
+
+  // -------- Share --------
+  function buildShareText(note) {
+    const title = (note.title || '').trim();
+    const body = note.body || '';
+    return title ? title + '\n\n' + body : body;
+  }
+
+  function showShareStatus(message) {
+    if (!message) {
+      els.shareStatus.hidden = true;
+      els.shareStatus.textContent = '';
+      return;
+    }
+    els.shareStatus.hidden = false;
+    els.shareStatus.textContent = message;
+  }
+
+  function fallbackCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch (e) {
+      ok = false;
+    }
+    ta.remove();
+    return ok;
+  }
+
+  async function copyShare() {
+    const note = getNote(state.selectedId);
+    if (!note || isTrashed(note)) return;
+    const text = buildShareText(note);
+    let ok = false;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      } catch (e) {
+        ok = false;
+      }
+    }
+    if (!ok) ok = fallbackCopy(text);
+    showShareStatus(ok ? 'Copied to clipboard.' : 'Copy failed — try selecting the note text manually.');
+    if (ok) setTimeout(() => showShareStatus(''), 2000);
+  }
+
+  function emailShare() {
+    const note = getNote(state.selectedId);
+    if (!note || isTrashed(note)) return;
+    const subject = (note.title || '').trim() || 'Note from Scratchpad';
+    let body = buildShareText(note);
+    if (encodeURIComponent(body).length > MAILTO_ENCODED_LIMIT) {
+      while (body.length && encodeURIComponent(body).length > MAILTO_ENCODED_LIMIT - 60) {
+        body = body.slice(0, -50);
+      }
+      body += '\n\n[note continues - open Scratchpad to see the rest]';
+    }
+    const href = 'mailto:?subject=' + encodeURIComponent(subject) +
+      '&body=' + encodeURIComponent(body);
+    window.location.href = href;
+  }
+
+  function openShareDialog() {
+    const note = getNote(state.selectedId);
+    if (!note || isTrashed(note)) return;
+    showShareStatus('');
+    const encodedLen = encodeURIComponent(buildShareText(note)).length;
+    els.shareMailtoWarning.hidden = encodedLen <= MAILTO_ENCODED_LIMIT;
+    els.shareLinkError.hidden = true;
+    let explainerSeen = false;
+    try {
+      explainerSeen = !!localStorage.getItem(SHARE_EXPLAINER_KEY);
+    } catch (e) { /* private mode / blocked storage; keep showing the explainer */ }
+    els.shareExplainer.hidden = explainerSeen;
+    // A longer-lived link is a deliberate per-link choice, not a sticky setting.
+    els.shareExpiryDays.value = '7';
+    refreshShareLinks(note.id);
+    openDialog(els.shareDialog);
+  }
+
+  // -------- Public share links --------
+  // The one place in Scratchpad that sends note content off the device. It goes
+  // out encrypted, and the key never goes with it: it lives in the URL fragment,
+  // which browsers do not transmit.
+
+  const SHARE_EXPLAINER_KEY = 'scratchpad:shareExplainerSeenAt';
+
+  function showShareLinkError(message) {
+    els.shareLinkError.textContent = message;
+    els.shareLinkError.hidden = false;
+  }
+
+  function refreshShareLinks(noteId) {
+    return window.ScratchpadShareControls.refresh(noteId);
+  }
+
+  async function createPublicShare() {
+    const note = getNote(state.selectedId);
+    if (!note || isTrashed(note)) return undefined;
+    if (state.dirty) { showShareLinkError('Save your changes before creating a public link.'); return undefined; }
+    els.shareLinkError.hidden = true;
+    return withBusy('create-share', [els.createShareLink], 'Sharing failed. Reopen the share dialog to check whether a link was created.', async () => {
+      try {
+        await window.ScratchpadShareManager.create(note, Number(els.shareExpiryDays.value));
+      } catch (error) {
+        showShareLinkError(error.message || 'Sharing failed. Reopen the dialog to check the link.');
+        return;
+      }
+      try { localStorage.setItem(SHARE_EXPLAINER_KEY, String(now())); } catch (e) { /* optional preference */ }
+      els.shareExplainer.hidden = true;
+      state.sharedNoteIds.add(note.id);
+      await refreshShareLinks(note.id);
+      renderAll();
+    });
+  }
+
+  function revokeShare(share) {
+    return window.ScratchpadShareManager.revoke(share);
+  }
+
+  // Best effort: a note leaving the active set should not leave a public link
+  // behind, but a network failure must never block the deletion. A row whose
+  // revoke succeeded is removed here; a failed one is kept, because the row
+  // holds the only copy of the revoke token and destroying it makes the link
+  // unrevokable for its full remaining life — 30 days at most. Returns how
+  // many links are still live so the caller can tell the user.
+  async function revokeSharesForNote(noteId) {
+    let shares = [];
+    try {
+      shares = await DB.getSharesForNote(noteId);
+    } catch {
+      return 0;
+    }
+    let stillLive = 0;
+    for (const share of shares) {
+      try {
+        if (await revokeShare(share)) await DB.removeShare(share.id);
+        else stillLive += 1;
+      } catch {
+        stillLive += 1;
+      }
+    }
+    return stillLive;
+  }
+
+  // The revoke leg is best-effort; when it fails the user must hear that a
+  // link outlived the note, because nothing else will ever tell them.
+  function warnUnrevoked(count, advice) {
+    if (!count) return;
+    const what = count === 1
+      ? 'One public link could not be revoked; it stays live until it expires.'
+      : count + ' public links could not be revoked; they stay live until they expire.';
+    toast(advice ? what + ' ' + advice : what, { tone: 'error' });
+  }
+
+  async function syncSharedNoteIds() {
+    const shares = await DB.getAllShares();
+    state.sharedNoteIds = new Set(shares.map((share) => share.noteId));
+  }
+
+  function isShared(noteId) {
+    return state.sharedNoteIds.has(noteId);
+  }
+
+  // -------- Command palette --------
+  function commandDefinitions() {
+    const reviewMonth = monthlyReviewTargetMonth();
+    const monthlyReview = findMonthlyReview(reviewMonth);
+    const commands = [
+      {
+        id: 'new-note',
+        label: 'New note',
+        meta: 'Create a blank note',
+        keywords: 'create write',
+        run: createNote,
+      },
+      {
+        id: 'open-settings',
+        label: 'Open settings',
+        meta: 'Theme, your data, linked folder',
+        keywords: 'settings preferences theme dark light backup storage folder erase',
+        run: openSettingsDialog,
+      },
+      {
+        id: 'today-note',
+        label: "Open today’s note",
+        meta: 'Daily note — created on first use',
+        keywords: 'today daily journal log',
+        run: openTodayNote,
+      },
+      {
+        id: 'quick-capture',
+        label: 'Quick capture',
+        meta: "Append a timestamped line to today’s note",
+        keywords: 'capture jot inbox quick add',
+        run: openQuickCapture,
+      },
+      {
+        id: 'monthly-review',
+        label: (monthlyReview ? 'Open ' : 'Create ') + monthLabel(reviewMonth) + ' monthly review',
+        meta: monthlyReview ? 'Return to this month’s reflection' : 'Start with prompts and links to daily notes',
+        keywords: 'monthly review reflection recap retrospective daily notes month',
+        run: () => openMonthlyReview(reviewMonth),
+      },
+      {
+        id: 'search-notes',
+        label: 'Search notes',
+        meta: 'Focus the sidebar search',
+        keywords: 'find filter',
+        run: () => {
+          els.search.focus();
+          els.search.select();
+        },
+      },
+      {
+        id: 'manage-tags',
+        label: 'Manage tags',
+        meta: 'Rename, filter, or delete tags',
+        keywords: 'tag labels',
+        run: openTagManager,
+      },
+      {
+        id: 'new-folder',
+        label: 'New folder',
+        meta: 'Create a folder',
+        keywords: 'folder group organize create',
+        run: () => openFolderDialog(null),
+      },
+      {
+        id: 'toggle-focus-mode',
+        label: state.focusMode ? 'Exit focus mode' : 'Enter focus mode',
+        meta: 'Distraction-free writing',
+        keywords: 'focus zen distraction hide sidebar minimal writing',
+        run: toggleFocusMode,
+      },
+      {
+        id: 'toggle-bulk',
+        label: state.bulkMode ? 'Exit selection mode' : 'Select multiple notes',
+        meta: 'Bulk actions',
+        keywords: 'bulk batch multi',
+        run: toggleBulkMode,
+      },
+      {
+        id: 'export-backup',
+        label: 'Export backup',
+        meta: 'Download JSON backup',
+        keywords: 'backup json download',
+        run: exportAll,
+      },
+      {
+        id: 'export-markdown',
+        label: 'Export Markdown ZIP',
+        meta: 'Download active notes as Markdown',
+        keywords: 'zip markdown download',
+        run: exportMarkdownZip,
+      },
+      {
+        id: 'import-notes',
+        label: 'Import notes',
+        meta: 'Restore a JSON backup',
+        keywords: 'backup restore json',
+        run: () => els.importFile.click(),
+      },
+      {
+        id: 'view-notes',
+        label: 'View Notes',
+        meta: 'Show active notes',
+        keywords: 'active list',
+        run: () => setView('active'),
+      },
+      {
+        id: 'view-archive',
+        label: 'View Archive',
+        meta: 'Show archived notes',
+        keywords: 'archived reference completed',
+        run: () => setView('archive'),
+      },
+      {
+        id: 'view-trash',
+        label: 'View Trash',
+        meta: 'Show deleted notes',
+        keywords: 'deleted',
+        run: () => setView('trash'),
+      },
+      {
+        id: 'open-guide',
+        label: 'Open user guide',
+        meta: 'How to use every feature',
+        keywords: 'help docs manual how to guide',
+        run: () => window.open('guide.html', '_blank', 'noopener'),
+      },
+      {
+        id: 'diagnostics',
+        label: 'Open diagnostics',
+        meta: 'Storage and backup health',
+        keywords: 'about local health storage',
+        run: openAboutDialog,
+      },
+    ];
+
+    const selectedNote = getNote(state.selectedId);
+    if (selectedNote && !isTrashed(selectedNote)) {
+      commands.push({
+        id: isArchived(selectedNote) ? 'unarchive-note' : 'archive-note',
+        label: isArchived(selectedNote) ? 'Unarchive note' : 'Archive note',
+        meta: isArchived(selectedNote) ? 'Return the selected note to Notes' : 'Move the selected note to Archive',
+        keywords: 'archive unarchive lifecycle',
+        run: () => setCurrentArchiveState(!isArchived(selectedNote)),
+      });
+    }
+    if (selectedNote && !isTrashed(selectedNote) && !isDailyNote(selectedNote)) {
+      commands.push({
+        id: 'move-to-folder',
+        label: 'Move note to folder…',
+        meta: 'File the selected note',
+        keywords: 'folder move file organize',
+        run: () => openMoveDialog([selectedNote.id]),
+      });
+      commands.push({
+        id: 'duplicate-note',
+        label: 'Duplicate note',
+        meta: 'Create a copy of the selected note',
+        keywords: 'copy clone duplicate',
+        run: duplicateCurrentNote,
+      });
+    }
+
+    if (state.editing && window.ScratchpadFind) {
+      commands.push({
+        id: 'find-in-note',
+        label: 'Find in note',
+        meta: '⌘/Ctrl+F — find and replace in this note',
+        keywords: 'find replace search locate text',
+        run: () => window.ScratchpadFind.open(),
+      });
+    }
+
+    if (window.ScratchpadTemplates) commands.push(...window.ScratchpadTemplates.commands());
+    commands.push(...HomeDesk.commands(), ...window.ScratchpadShortcuts.commands());
+    const notes = sortNotes(state.notes)
+      .slice(0, 8)
+      .map((note) => ({
+        id: 'note-' + note.id,
+        label: deriveTitle(note),
+        meta: isTrashed(note) ? 'Open note in Trash' : isArchived(note) ? 'Open note in Archive' : 'Open note',
+        keywords: [note.body || '', (note.tags || []).join(' ')].join(' '),
+        run: () => openNoteFromCommand(note.id),
+      }));
+    return commands.concat(notes);
+  }
+
+  async function openNoteFromCommand(id) {
+    const note = getNote(id);
+    if (!note) return;
+    if (state.editing && state.dirty) {
+      const ok = await confirmDiscard();
+      if (!ok) return;
+      await discardCurrentDraft();
+    }
+    state.view = noteLifecycleView(note);
+    state.selectedId = note.id;
+    state.editing = false;
+    state.dirty = false;
+    state.mobileView = 'editor';
+    renderAll();
+    await maybePromptDraftForSelected();
+  }
+
+  // Exact substring matches rank above fuzzy-only matches so typing a
+  // command's name verbatim always puts it first.
+  function filteredCommandItems() {
+    const q = els.commandPaletteInput.value;
+    const nq = Search.normalize(q);
+    const all = commandDefinitions()
+      .filter((item) => Search.matchesLoose([item.label, item.meta, item.keywords].join(' '), q));
+    if (!nq) return all.slice(0, 12);
+    const exact = [];
+    const fuzzy = [];
+    for (const item of all) {
+      const hay = Search.normalize([item.label, item.meta, item.keywords].join(' '));
+      (hay.includes(nq) ? exact : fuzzy).push(item);
+    }
+    return exact.concat(fuzzy).slice(0, 12);
+  }
+
+  function renderCommandPaletteList() {
+    const items = filteredCommandItems();
+    state.commandItems = items;
+    if (!items.length) state.commandIndex = -1;
+    else if (state.commandIndex < 0 || state.commandIndex >= items.length) {
+      state.commandIndex = Math.max(0, items.length - 1);
+    }
+    const rows = items.map((item, index) => el('div', {
+      class: 'command-palette-item' + (index === state.commandIndex ? ' is-active' : ''),
+      attrs: {
+        id: 'command-palette-option-' + index,
+        role: 'option',
+        tabindex: '-1',
+        'aria-selected': index === state.commandIndex ? 'true' : 'false',
+      },
+      children: [
+        el('span', { class: 'command-palette-label', text: item.label }),
+        el('span', { class: 'command-palette-meta', text: item.meta }),
+      ],
+      on: {
+        click: () => runCommandAt(index),
+        mouseenter: () => setCommandPaletteIndex(index, false),
+        mousedown: (event) => event.preventDefault(),
+      },
+    }));
+    els.commandPaletteList.replaceChildren(...rows);
+    els.commandPaletteEmpty.hidden = items.length > 0;
+    els.commandPaletteStatus.textContent = items.length
+      ? `${items.length} result${items.length === 1 ? '' : 's'} available.`
+      : 'No commands or notes found.';
+    syncCommandPaletteSelection(false);
+  }
+
+  function syncCommandPaletteSelection(scroll) {
+    const options = Array.from(els.commandPaletteList.querySelectorAll('[role="option"]'));
+    for (let index = 0; index < options.length; index += 1) {
+      const active = index === state.commandIndex;
+      options[index].classList.toggle('is-active', active);
+      options[index].setAttribute('aria-selected', active ? 'true' : 'false');
+    }
+    const active = options[state.commandIndex];
+    if (!active) {
+      els.commandPaletteInput.removeAttribute('aria-activedescendant');
+      return;
+    }
+    els.commandPaletteInput.setAttribute('aria-activedescendant', active.id);
+    if (scroll) active.scrollIntoView({ block: 'nearest' });
+  }
+
+  function setCommandPaletteIndex(index, scroll) {
+    if (!state.commandItems.length) {
+      state.commandIndex = -1;
+    } else {
+      state.commandIndex = Math.max(0, Math.min(index, state.commandItems.length - 1));
+    }
+    syncCommandPaletteSelection(scroll);
+  }
+
+  function openCommandPalette(query) {
+    state.commandIndex = 0;
+    els.commandPaletteInput.value = typeof query === 'string' ? query : '';
+    els.commandPaletteInput.setAttribute('aria-expanded', 'true');
+    renderCommandPaletteList();
+    openDialog(els.commandPaletteDialog);
+    setTimeout(() => els.commandPaletteInput.focus(), 0);
+  }
+
+  function runCommandAt(index) {
+    const item = state.commandItems[index];
+    if (!item) return;
+    closeDialog(els.commandPaletteDialog);
+    els.commandPaletteInput.value = '';
+    item.run();
+  }
+
+  function onCommandPaletteKey(e) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setCommandPaletteIndex(state.commandIndex + 1, true);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setCommandPaletteIndex(state.commandIndex - 1, true);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      runCommandAt(state.commandIndex);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeDialog(els.commandPaletteDialog);
+    }
+  }
+
+  // -------- Revision history --------
+  async function openHistoryDialog() {
+    const note = getNote(state.selectedId);
+    if (!note || isTrashed(note)) return;
+    const revisions = await DB.getRevisions(note.id);
+    if (!revisions.length) {
+      els.historyList.replaceChildren(el('p', { class: 'muted-copy', text: 'No saved revisions yet.' }));
+      openDialog(els.historyDialog);
+      return;
+    }
+    const rows = revisions.map((rev) => renderRevisionRow(rev, note));
+    els.historyList.replaceChildren(...rows);
+    openDialog(els.historyDialog);
+  }
+
+  function renderRevisionRow(rev, note) {
+    const title = el('div', { class: 'history-title', text: deriveTitle(rev) });
+    const meta = el('div', { class: 'history-meta', text: 'Saved ' + formatFullTimestamp(rev.savedAt) });
+    const unsaved = state.editing && state.dirty;
+    const details = window.ScratchpadRevisionDiff.renderDetails(rev, note, { unsaved });
+    const restore = el('button', {
+      class: 'btn btn-secondary btn-sm',
+      text: 'Restore',
+      attrs: { type: 'button' },
+      on: { click: () => restoreRevision(rev) },
+    });
+    return el('div', { class: 'history-row', children: [title, meta, ...details, restore] });
+  }
+
+  async function restoreRevision(rev) {
+    const note = getNote(state.selectedId);
+    if (!note || isTrashed(note)) return;
+    if (state.editing && state.dirty) {
+      // Restoring replaces the editor's content outright, same as any other
+      // action that would blow away an in-progress edit — close this dialog
+      // and reuse the discard confirmation rather than clobber silently.
+      closeDialog(els.historyDialog);
+      const ok = await confirmDiscard();
+      if (!ok) return;
+      await discardCurrentDraft();
+    }
+    return withBusy('restore-revision', [], 'Revision restore failed.', async () => {
+      const nextNote = {
+        ...note,
+        title: rev.title || '',
+        body: rev.body || '',
+        tags: Array.isArray(rev.tags) ? [...rev.tags] : [],
+        pinned: !!rev.pinned,
+        updatedAt: nextUpdatedAt(note),
+        lastDraftAt: null,
+      };
+      await storeRevision(note);
+      await putNoteRecord(nextNote);
+      await DB.removeDraft(note.id);
+      Object.assign(note, nextNote);
+      state.editing = false;
+      state.dirty = false;
+      closeDialog(els.historyDialog);
+      renderAll();
+      toast('Revision restored.');
+    });
+  }
+
+  // -------- Export / Import --------
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = el('a', { attrs: { href: url } });
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function exportStamp() {
+    return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  }
+
+  async function buildBackupPayload() {
+    const notes = (await DB.getAll()).map(normalizeNote);
+    const noteIds = new Set(notes.map((note) => note.id));
+    const revisions = (await DB.getAllRevisions())
+      .map((rev) => normalizeRevision(rev, rev.noteId))
+      .filter((rev) => rev && noteIds.has(rev.noteId));
+    const folders = (await DB.getAllFolders()).map((f, i) => normalizeFolder(f, i)).filter(Boolean);
+    folders.sort((a, b) => (a.sortOrder - b.sortOrder) || (a.createdAt - b.createdAt));
+    return {
+      app: 'scratchpad',
+      version: window.SCRATCHPAD_VERSION || 'unknown',
+      schemaVersion: 5,
+      exportedAt: new Date().toISOString(),
+      notes: notes.filter((n) => !isTrashed(n)),
+      trashedNotes: notes.filter(isTrashed),
+      revisions,
+      folders,
+      attachments: window.ScratchpadAttachments ? await window.ScratchpadAttachments.serialize(null) : [],
+    };
+  }
+
+  async function exportAll() {
+    return withBusy('export-json', [els.exportBtn], 'Export failed.', async () => {
+      const payload = await buildBackupPayload();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      downloadBlob(blob, `scratchpad-${exportStamp()}.json`);
+      recordBackupDownload();
+      toast('Backup downloaded (JSON).');
+    });
+  }
+
+  // v2 backups predate folders; v3 adds folders; v4 adds Archive provenance.
+  function isNativeBackup(data) {
+    if (!data || Array.isArray(data) || data.app !== 'scratchpad') return false;
+    if (![2, 3, 4, 5].includes(data.schemaVersion)) return false;
+    const lists = [data.notes, data.trashedNotes, data.revisions].every(Array.isArray);
+    return lists && (data.folders === undefined || Array.isArray(data.folders));
+  }
+
+  function resetPassphraseDialog() {
+    els.backupPassphrase.value = '';
+    els.backupPassphraseConfirm.value = '';
+    els.backupPassphraseShow.checked = false;
+    els.backupPassphrase.type = 'password';
+    els.backupPassphraseConfirm.type = 'password';
+    els.backupPassphrase.removeAttribute('aria-invalid');
+    els.backupPassphraseConfirm.removeAttribute('aria-invalid');
+    els.backupPassphraseError.textContent = '';
+    els.backupPassphraseError.hidden = true;
+  }
+
+  function clearPassphraseSession() {
+    resetPassphraseDialog();
+    state.backupPassphraseMode = null;
+    state.encryptedImport = null;
+  }
+
+  function openEncryptedExportDialog() {
+    closeDialog(els.aboutDialog);
+    state.backupPassphraseMode = 'export';
+    state.encryptedImport = null;
+    resetPassphraseDialog();
+    els.backupPassphraseTitle.textContent = 'Encrypt backup';
+    els.backupPassphraseCopy.textContent = 'Choose a passphrase. It cannot be recovered if you forget it.';
+    els.backupPassphraseConfirmWrap.hidden = false;
+    els.confirmEncryptedExport.hidden = false;
+    els.confirmEncryptedImport.hidden = true;
+    openDialog(els.backupPassphraseDialog);
+    setTimeout(() => els.backupPassphrase.focus(), 0);
+  }
+
+  function openEncryptedImportDialog(envelope) {
+    closeDialog(els.aboutDialog);
+    state.backupPassphraseMode = 'import';
+    state.encryptedImport = envelope;
+    resetPassphraseDialog();
+    els.backupPassphraseTitle.textContent = 'Unlock encrypted backup';
+    els.backupPassphraseCopy.textContent = 'Enter the passphrase used when this backup was created.';
+    els.backupPassphraseConfirmWrap.hidden = true;
+    els.confirmEncryptedExport.hidden = true;
+    els.confirmEncryptedImport.hidden = false;
+    openDialog(els.backupPassphraseDialog);
+    setTimeout(() => els.backupPassphrase.focus(), 0);
+  }
+
+  function showPassphraseError(message) {
+    els.backupPassphrase.setAttribute('aria-invalid', 'true');
+    els.backupPassphraseError.textContent = message;
+    els.backupPassphraseError.hidden = false;
+    els.backupPassphrase.focus();
+  }
+
+  async function exportEncryptedBackup() {
+    const passphrase = els.backupPassphrase.value;
+    if (passphrase.length < 12) {
+      showPassphraseError('Use at least 12 characters for this backup passphrase.');
+      return;
+    }
+    if (passphrase !== els.backupPassphraseConfirm.value) {
+      els.backupPassphraseConfirm.setAttribute('aria-invalid', 'true');
+      showPassphraseError('The passphrases do not match.');
+      return;
+    }
+    return withBusy('export-encrypted', [els.confirmEncryptedExport], 'Encrypted export failed.', async () => {
+      const envelope = await ScratchpadCrypto.encryptBackupPayload(await buildBackupPayload(), passphrase);
+      const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
+      downloadBlob(blob, `scratchpad-encrypted-${exportStamp()}.scratchpad`);
+      closeDialog(els.backupPassphraseDialog);
+      clearPassphraseSession();
+      recordBackupDownload();
+      toast('Encrypted backup downloaded.');
+    });
+  }
+
+  async function unlockEncryptedBackup() {
+    if (!state.encryptedImport) return;
+    return withBusy('import-encrypted', [els.confirmEncryptedImport], '', async () => {
+      let data;
+      try {
+        data = await ScratchpadCrypto.decryptBackupEnvelope(state.encryptedImport, els.backupPassphrase.value);
+      } catch (e) {
+        console.warn('Encrypted backup unlock failed', e);
+        showPassphraseError('The passphrase or file is invalid. Try again.');
+        return;
+      }
+      const preview = buildImportPreview(data);
+      if (!preview.notes.length) {
+        showPassphraseError('This backup does not contain any valid notes.');
+        return;
+      }
+      state.importPreview = preview;
+      state.encryptedImport = null;
+      closeDialog(els.backupPassphraseDialog);
+      clearPassphraseSession();
+      renderImportPreview(preview);
+      openDialog(els.importPreviewDialog);
+    });
+  }
+
+  // Given a note (the note menu), exports just that note: a .md, or a ZIP with its images. Called bare, every note.
+  async function exportMarkdownZip(only) {
+    const one = only && only.id ? only : null;
+    return withBusy('export-markdown', [els.exportMarkdownBtn, els.exportOverflowBtn], 'Markdown export failed.', async () => {
+      const notes = one ? [one] : preservedNotes();
+      if (!notes.length) {
+        toast('No notes to export.', { tone: 'info' });
+        return;
+      }
+      // Uniqueness is tracked on the emitted filename, not the slug: a
+      // generated suffix can collide with another note's natural slug
+      // ('Report' twice plus 'Report 2' all reduce to report-2), and a ZIP
+      // with duplicate entry names silently drops a note in most extractors.
+      const taken = new Set();
+      const bundle = await window.ScratchpadAttachments.forZip(new Set(notes.map((note) => note.id)));
+      const files = notes.map((note) => {
+        const folderId = noteFolderId(note);
+        const archiveDir = isArchived(note) ? 'archive/' : '';
+        const folderDir = folderId ? slugify(folderDisplayName(folderId)) + '/' : '';
+        const dir = one ? '' : archiveDir + folderDir;
+        const base = dir + (slugify(deriveTitle(note)) || 'untitled-note');
+        let name = `${base}.md`;
+        for (let n = 2; taken.has(name); n += 1) name = `${base}-${n}.md`;
+        taken.add(name);
+        return { name, content: bundle.rewrite(noteToMarkdown(note)) };
+      });
+      files.push(...bundle.files);
+      const plain = !!one && files.length === 1;
+      const name = (one ? files[0].name.slice(0, -3) : `scratchpad-markdown-${exportStamp()}`) + (plain ? '.md' : '.zip');
+      downloadBlob(plain ? new Blob([files[0].content], { type: 'text/markdown' }) : new Blob([Zip.createZip(files)], { type: 'application/zip' }), name);
+      if (!one) recordBackupDownload();
+      toast(one ? 'Downloaded ' + name + '.' : 'Markdown ZIP downloaded.');
+    });
+  }
+
+  function noteToMarkdown(note) {
+    const lines = [
+      '---',
+      'id: ' + JSON.stringify(note.id),
+      'title: ' + JSON.stringify(deriveTitle(note)),
+      'tags: [' + (note.tags || []).map((tag) => JSON.stringify(tag)).join(', ') + ']',
+      'pinned: ' + (!!note.pinned ? 'true' : 'false'),
+      ...(note.dailyDate ? ['dailyDate: ' + JSON.stringify(note.dailyDate)] : []),
+      ...(note.monthlyReviewMonth ? ['monthlyReviewMonth: ' + JSON.stringify(note.monthlyReviewMonth)] : []),
+      ...(isArchived(note) ? ['archivedAt: ' + JSON.stringify(new Date(note.archivedAt).toISOString())] : []),
+      'createdAt: ' + JSON.stringify(new Date(note.createdAt).toISOString()),
+      'updatedAt: ' + JSON.stringify(new Date(note.updatedAt).toISOString()),
+      '---',
+      '',
+      note.body || '',
+    ];
+    return lines.join('\n');
+  }
+
+  function slugify(text) {
+    return (text || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80);
+  }
+
+  function importError(label, reason) {
+    return label + ': ' + reason;
+  }
+
+  function validateTags(rawTags, errors, preserveNativeLengths) {
+    if (rawTags == null) return;
+    if (!Array.isArray(rawTags)) {
+      errors.push('tags must be an array');
+      return;
+    }
+    if (!preserveNativeLengths && rawTags.length > NOTE_TAGS_MAX) errors.push('too many tags');
+    for (const tag of rawTags) {
+      if (typeof tag !== 'string') {
+        errors.push('tags must be text');
+        continue;
+      }
+      const normalized = normalizeTag(tag);
+      if (!preserveNativeLengths && normalized.length > NOTE_TAG_MAX) errors.push('tag is too long');
+    }
+  }
+
+  function validateImportText(raw, key, max, errors, preserveNativeLengths) {
+    if (raw[key] == null) return;
+    if (typeof raw[key] !== 'string') {
+      errors.push(key + ' must be text');
+      return;
+    }
+    if (!preserveNativeLengths && raw[key].length > max) errors.push(key + ' is too long');
+  }
+
+  function validateImportNote(raw, index, preserveNativeLengths) {
+    const label = 'Note ' + (index + 1);
+    const errors = [];
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return { error: importError(label, 'entry is not a note object') };
+    }
+    if (raw.id != null && typeof raw.id !== 'string') errors.push('id must be text');
+    if (typeof raw.title !== 'string' && typeof raw.body !== 'string') {
+      errors.push('title or body is required');
+    }
+    validateImportText(raw, 'title', NOTE_TITLE_MAX, errors, preserveNativeLengths);
+    validateImportText(raw, 'body', NOTE_BODY_MAX, errors, preserveNativeLengths);
+    validateTags(raw.tags, errors, preserveNativeLengths);
+    if (errors.length) return { error: importError(label, errors[0]) };
+    return { note: normalizeNote(raw) };
+  }
+
+  function validateImportRevision(raw, index, validNoteIds, preserveNativeLengths) {
+    const label = 'Revision ' + (index + 1);
+    const errors = [];
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return { error: importError(label, 'entry is not a revision object') };
+    }
+    if (typeof raw.noteId !== 'string' || !raw.noteId) errors.push('noteId is required');
+    else if (!validNoteIds.has(raw.noteId)) errors.push('noteId does not match an imported note');
+    validateImportText(raw, 'title', NOTE_TITLE_MAX, errors, preserveNativeLengths);
+    validateImportText(raw, 'body', NOTE_BODY_MAX, errors, preserveNativeLengths);
+    validateTags(raw.tags, errors, preserveNativeLengths);
+    if (errors.length) return { error: importError(label, errors[0]) };
+    return { revision: normalizeRevision(raw, raw.noteId) };
+  }
+
+  function isMarkdownFile(file) {
+    return /\.(md|markdown)$/i.test(file.name || '') || file.type === 'text/markdown';
+  }
+
+  function parseFrontmatterValue(value) {
+    const source = value.trim();
+    if (!source) return '';
+    try {
+      return JSON.parse(source);
+    } catch (e) {
+      if (source === 'true') return true;
+      if (source === 'false') return false;
+      return source.replace(/^['"]|['"]$/g, '');
+    }
+  }
+
+  function parseMarkdownNote(text) {
+    const lines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
+    const metadata = {};
+    let bodyLines = lines;
+    if (lines[0] === '---') {
+      const end = lines.indexOf('---', 1);
+      if (end > 0) {
+        for (const line of lines.slice(1, end)) {
+          const match = line.match(/^([A-Za-z][A-Za-z0-9]*):\s*(.*)$/);
+          if (match) metadata[match[1]] = parseFrontmatterValue(match[2]);
+        }
+        bodyLines = lines.slice(end + 1);
+        if (bodyLines[0] === '') bodyLines.shift();
+      }
+    }
+    const body = bodyLines.join('\n');
+    const createdAt = Date.parse(metadata.createdAt);
+    const updatedAt = Date.parse(metadata.updatedAt);
+    const archivedAt = Date.parse(metadata.archivedAt);
+    const tags = Array.isArray(metadata.tags)
+      ? metadata.tags
+      : typeof metadata.tags === 'string'
+        ? metadata.tags.split(',')
+        : [];
+    const candidate = normalizeNote({
+      id: typeof metadata.id === 'string' && metadata.id ? metadata.id : uuid(),
+      title: typeof metadata.title === 'string' ? metadata.title : '',
+      body,
+      tags,
+      pinned: metadata.pinned === true,
+      createdAt: Number.isFinite(createdAt) ? createdAt : now(),
+      updatedAt: Number.isFinite(updatedAt) ? updatedAt : (Number.isFinite(createdAt) ? createdAt : now()),
+      archivedAt: Number.isFinite(archivedAt) ? archivedAt : null,
+      deletedAt: null,
+      lastDraftAt: null,
+      dailyDate: typeof metadata.dailyDate === 'string' ? metadata.dailyDate : null,
+      monthlyReviewMonth: typeof metadata.monthlyReviewMonth === 'string'
+        ? metadata.monthlyReviewMonth
+        : null,
+    });
+    if (!candidate.title) candidate.title = deriveTitle(candidate);
+    return candidate;
+  }
+
+  function presentImportData(data) {
+    const preview = buildImportPreview(data);
+    if (!preview.notes.length && !preview.folders.length) {
+      const rejected = preview.invalid + preview.invalidRevisions + preview.invalidFolders;
+      toast(
+        rejected ? `Import found no valid notes. Rejected ${rejected} invalid entr${rejected === 1 ? 'y' : 'ies'}.` : 'Import found no valid notes in that file.',
+        { tone: 'error' }
+      );
+      return;
+    }
+    state.importPreview = preview;
+    renderImportPreview(preview);
+    openDialog(els.importPreviewDialog);
+  }
+
+  async function importFromFiles(files) {
+    // Close the About dialog up front so any error toast / the preview dialog
+    // isn't covered by the modal's top layer.
+    closeDialog(els.aboutDialog);
+    const selected = Array.from(files || []);
+    if (!selected.length) return;
+    const markdown = selected.filter(isMarkdownFile);
+    if (markdown.length && markdown.length !== selected.length) {
+      toast('Choose JSON or Markdown files, not both.', { tone: 'error' });
+      return;
+    }
+    if (!markdown.length && selected.length !== 1) {
+      toast('Choose one JSON or encrypted backup at a time.', { tone: 'error' });
+      return;
+    }
+    if (markdown.length) {
+      if (markdown.length > IMPORT_MAX_NOTES) {
+        toast(`Import failed: choose no more than ${IMPORT_MAX_NOTES} Markdown files at a time.`, { tone: 'error' });
+        return;
+      }
+      if (markdown.some((file) => file.size > IMPORT_MAX_FILE_BYTES)) {
+        toast('Import failed: Markdown files must be 2 MB or smaller.', { tone: 'error' });
+        return;
+      }
+      const notes = [];
+      try {
+        for (const file of markdown) notes.push(parseMarkdownNote(await file.text()));
+      } catch (e) {
+        console.error('Markdown import read failed', e);
+        toast('Import failed: Scratchpad could not read those Markdown files.', { tone: 'error' });
+        return;
+      }
+      presentImportData({ notes });
+      return;
+    }
+    const file = selected[0];
+    let text;
+    try {
+      text = await file.text();
+    } catch (e) {
+      console.error('Import read failed', e);
+      toast('Import failed: Scratchpad could not read that file.', { tone: 'error' });
+      return;
+    }
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      toast('Import failed: that file is not valid JSON.', { tone: 'error' });
+      return;
+    }
+    if (ScratchpadCrypto.isEncryptedBackup(data)) {
+      openEncryptedImportDialog(data);
+      return;
+    }
+    if (file.size > IMPORT_MAX_FILE_BYTES && !isNativeBackup(data)) {
+      toast('Import failed: backup files must be 2 MB or smaller.', { tone: 'error' });
+      return;
+    }
+    presentImportData(data);
+  }
+
+  function buildImportPreview(data) {
+    const empty = {
+      notes: [],
+      revisions: [],
+      folders: [],
+      attachments: [],
+      invalid: 0,
+      invalidRevisions: 0,
+      invalidFolders: 0,
+      rejectedNotes: [],
+      rejectedRevisions: [],
+      rejectedFolders: [],
+      newCount: 0,
+      conflicts: 0,
+    };
+    if (!data || typeof data !== 'object') {
+      return {
+        ...empty,
+        invalid: 1,
+        rejectedNotes: [importError('File', 'top-level JSON must be an object or array')],
+      };
+    }
+    const nativeBackup = isNativeBackup(data);
+    let rawNotes = Array.isArray(data)
+      ? data
+      : []
+        .concat(Array.isArray(data.notes) ? data.notes : [])
+        .concat(Array.isArray(data.trashedNotes) ? data.trashedNotes : []);
+    const existingIds = new Set(state.notes.map((n) => n.id));
+    const seenIds = new Set();
+    const notes = [];
+    const rejectedNotes = [];
+    if (!nativeBackup && rawNotes.length > IMPORT_MAX_NOTES) {
+      for (let i = IMPORT_MAX_NOTES; i < rawNotes.length; i += 1) {
+        rejectedNotes.push(importError('Note ' + (i + 1), 'import limit exceeded'));
+      }
+      rawNotes = rawNotes.slice(0, IMPORT_MAX_NOTES);
+    }
+    for (let i = 0; i < rawNotes.length; i += 1) {
+      const result = validateImportNote(rawNotes[i], i, nativeBackup);
+      if (result.error) {
+        rejectedNotes.push(result.error);
+        continue;
+      }
+      if (seenIds.has(result.note.id)) {
+        rejectedNotes.push(importError('Note ' + (i + 1), 'duplicate id in import file'));
+        continue;
+      }
+      if (nativeBackup && data.schemaVersion < 4) result.note.archivedAt = null;
+      seenIds.add(result.note.id);
+      notes.push(result.note);
+    }
+    let rawRevisions = Array.isArray(data.revisions) ? data.revisions : [];
+    const validNoteIds = new Set(notes.map((note) => note.id));
+    const revisions = [];
+    const rejectedRevisions = [];
+    if (!nativeBackup && rawRevisions.length > IMPORT_MAX_REVISIONS) {
+      for (let i = IMPORT_MAX_REVISIONS; i < rawRevisions.length; i += 1) {
+        rejectedRevisions.push(importError('Revision ' + (i + 1), 'import limit exceeded'));
+      }
+      rawRevisions = rawRevisions.slice(0, IMPORT_MAX_REVISIONS);
+    }
+    for (let i = 0; i < rawRevisions.length; i += 1) {
+      const result = validateImportRevision(rawRevisions[i], i, validNoteIds, nativeBackup);
+      if (result.error) {
+        rejectedRevisions.push(result.error);
+        continue;
+      }
+      revisions.push(result.revision);
+    }
+    const conflicts = notes.filter((note) => existingIds.has(note.id)).length;
+    let rawFolders = Array.isArray(data.folders) ? data.folders : [];
+    const folders = [];
+    const rejectedFolders = [];
+    const seenFolderIds = new Set();
+    if (rawFolders.length > IMPORT_MAX_FOLDERS) {
+      for (let i = IMPORT_MAX_FOLDERS; i < rawFolders.length; i += 1) {
+        rejectedFolders.push(importError('Folder ' + (i + 1), 'import limit exceeded'));
+      }
+      rawFolders = rawFolders.slice(0, IMPORT_MAX_FOLDERS);
+    }
+    for (let i = 0; i < rawFolders.length; i += 1) {
+      const folder = normalizeFolder(rawFolders[i], i);
+      if (!folder) {
+        rejectedFolders.push(importError('Folder ' + (i + 1), 'invalid folder'));
+        continue;
+      }
+      if (seenFolderIds.has(folder.id)) {
+        rejectedFolders.push(importError('Folder ' + (i + 1), 'duplicate id in import file'));
+        continue;
+      }
+      seenFolderIds.add(folder.id);
+      folders.push(folder);
+    }
+    return {
+      notes,
+      revisions,
+      folders,
+      attachments: window.ScratchpadAttachments ? window.ScratchpadAttachments.parseBackup(data.attachments) : [],
+      invalid: rejectedNotes.length,
+      invalidRevisions: rejectedRevisions.length,
+      invalidFolders: rejectedFolders.length,
+      rejectedNotes,
+      rejectedRevisions,
+      rejectedFolders,
+      newCount: notes.length - conflicts,
+      conflicts,
+    };
+  }
+
+  function renderImportPreview(preview) {
+    els.importPreviewCounts.replaceChildren(...window.ScratchpadDialogs.importPreviewRows(preview));
+    const rejected = [...preview.rejectedNotes, ...preview.rejectedFolders, ...preview.rejectedRevisions];
+    els.importPreviewErrors.hidden = !rejected.length;
+    els.importPreviewErrors.replaceChildren(
+      ...(rejected.length ? window.ScratchpadDialogs.importRejectedContent(rejected) : [])
+    );
+    const duplicate = document.querySelector('input[name="import-conflict-mode"][value="duplicate"]');
+    if (duplicate) duplicate.checked = true;
+    updateImportOutcome();
+  }
+
+  function updateImportOutcome() {
+    const selected = document.querySelector('input[name="import-conflict-mode"]:checked');
+    els.confirmImport.textContent = window.ScratchpadDialogs.importOutcomeLabel(
+      state.importPreview,
+      selected ? selected.value : 'duplicate'
+    );
+  }
+
+  async function confirmImport() {
+    const preview = state.importPreview;
+    if (!preview) return;
+    return withBusy('import', [els.confirmImport], 'Import failed. No notes were changed.', async () => {
+      const selected = document.querySelector('input[name="import-conflict-mode"]:checked');
+      const mode = selected ? selected.value : 'duplicate';
+      const existingIds = new Set(state.notes.map((n) => n.id));
+      const idMap = new Map();
+      const notesToImport = [];
+      for (const note of preview.notes) {
+        const conflict = existingIds.has(note.id);
+        if (conflict && mode === 'skip') continue;
+        if (conflict && mode === 'duplicate') {
+          const newId = uuid();
+          idMap.set(note.id, newId);
+          notesToImport.push({ ...note, id: newId });
+        } else {
+          idMap.set(note.id, note.id);
+          notesToImport.push(note);
+        }
+      }
+      const revisionsToImport = preview.revisions
+        .filter((rev) => idMap.has(rev.noteId))
+        .map((rev) => ({ ...rev, id: uuid(), noteId: idMap.get(rev.noteId) }));
+      const attachments = window.ScratchpadAttachments.forImport(preview.attachments || [], idMap, uuid);
+      for (const note of notesToImport) note.body = attachments.rewrite(note.body || '');
+      // Folders merge by id (overwrite); a new id with a clashing name gets a
+      // numeric suffix. Anything past FOLDERS_MAX is dropped.
+      const existingFolderIds = new Set(state.folders.map((f) => f.id));
+      const takenNames = new Set(state.folders.map((f) => f.name.toLowerCase()));
+      const foldersToImport = [];
+      let importedUserFolderCount = userFolderCount();
+      for (const folder of preview.folders || []) {
+        if (existingFolderIds.has(folder.id)) {
+          foldersToImport.push(folder);
+          continue;
+        }
+        if (!isDailyNotesFolder(folder) && importedUserFolderCount >= FOLDERS_MAX) continue;
+        let name = folder.name;
+        let n = 2;
+        while (takenNames.has(name.toLowerCase())) {
+          name = (folder.name + ' ' + n).slice(0, FOLDER_NAME_MAX);
+          n += 1;
+        }
+        takenNames.add(name.toLowerCase());
+        foldersToImport.push({ ...folder, name });
+        if (!isDailyNotesFolder(folder)) importedUserFolderCount += 1;
+      }
+      await DB.importRecords(notesToImport, revisionsToImport, REVISION_LIMIT, foldersToImport, attachments.records);
+      for (const note of notesToImport) broadcastChange({ type: 'note-changed', noteId: note.id, updatedAt: note.updatedAt });
+      if (foldersToImport.length) broadcastChange({ type: 'folders-changed' });
+      state.importPreview = null;
+      closeDialog(els.importPreviewDialog);
+      await loadAll();
+      const imported = notesToImport.length;
+      toast(
+        imported ? `Imported ${imported} note${imported === 1 ? '' : 's'}.` : 'No new notes to import.',
+        { tone: imported ? 'success' : 'info' }
+      );
+    });
+  }
+
+  // -------- Tag management --------
+  function tagStats() {
+    const map = new Map();
+    for (const note of preservedNotes()) {
+      for (const tag of note.tags || []) {
+        const counts = map.get(tag) || { active: 0, archived: 0 };
+        if (isArchived(note)) counts.archived += 1;
+        else counts.active += 1;
+        map.set(tag, counts);
+      }
+    }
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }
+
+  function openTagManager() {
+    renderTagManager();
+    openDialog(els.tagManagerDialog);
+  }
+
+  function renderTagManager() {
+    const stats = tagStats();
+    if (!stats.length) {
+      els.tagManagerList.replaceChildren(el('p', { class: 'muted-copy', text: 'No tags yet.' }));
+      return;
+    }
+    const rows = stats.map(([tag, counts]) => renderTagManagerRow(tag, counts));
+    els.tagManagerList.replaceChildren(...rows);
+  }
+
+  function renderTagManagerRow(tag, counts) {
+    const count = counts.active + counts.archived;
+    const input = el('input', {
+      class: 'input tag-rename-input',
+      attrs: { type: 'text', value: tag, 'aria-label': 'Rename ' + tag },
+    });
+    const parts = [];
+    if (counts.active) parts.push(counts.active + ' active');
+    if (counts.archived) parts.push(counts.archived + ' archived');
+    const countNode = el('span', { class: 'tag-count', text: parts.join(' · ') });
+    const rename = el('button', {
+      class: 'btn btn-secondary btn-sm',
+      text: 'Rename',
+      attrs: { type: 'button' },
+      on: { click: () => renameTag(tag, input.value) },
+    });
+    const filter = el('button', {
+      class: 'btn btn-secondary btn-sm',
+      text: 'Filter',
+      attrs: { type: 'button' },
+      on: {
+        click: () => {
+          closeDialog(els.tagManagerDialog);
+          setTagFilter(tag);
+        },
+      },
+    });
+    const del = el('button', {
+      class: 'btn btn-danger btn-sm',
+      text: 'Delete',
+      attrs: { type: 'button' },
+      on: { click: () => openTagDelete(tag, count) },
+    });
+    return el('div', { class: 'tag-manager-row', children: [input, countNode, rename, filter, del] });
+  }
+
+  async function renameTag(oldTag, rawNewTag) {
+    const newTag = normalizeTag(rawNewTag);
+    if (!newTag || newTag === oldTag) return;
+    return withBusy('rename-tag', [], 'Tag rename failed.', async () => {
+      const changed = [];
+      const nextById = new Map();
+      for (const note of preservedNotes()) {
+        if (!(note.tags || []).includes(oldTag)) continue;
+        const nextNote = {
+          ...note,
+          tags: Array.from(new Set(note.tags.map((tag) => tag === oldTag ? newTag : tag))),
+          updatedAt: now(),
+        };
+        nextById.set(note.id, nextNote);
+        changed.push(putNoteRecord(nextNote));
+      }
+      await Promise.all(changed);
+      for (const note of state.notes) {
+        const nextNote = nextById.get(note.id);
+        if (nextNote) Object.assign(note, nextNote);
+      }
+      if (state.tagFilter === oldTag) state.tagFilter = newTag;
+      renderAll();
+      renderTagManager();
+    });
+  }
+
+  function openTagDelete(tag, count) {
+    state.pendingTagDelete = tag;
+    els.tagDeleteCopy.textContent = 'This removes #' + tag + ' from ' + count + (count === 1 ? ' note.' : ' notes.');
+    openDialog(els.tagDeleteDialog);
+  }
+
+  async function deletePendingTag() {
+    const tag = state.pendingTagDelete;
+    if (!tag) return;
+    return withBusy('delete-tag', [els.confirmTagDelete], 'Tag delete failed.', async () => {
+      const changed = [];
+      const nextById = new Map();
+      for (const note of preservedNotes()) {
+        if (!(note.tags || []).includes(tag)) continue;
+        const nextNote = {
+          ...note,
+          tags: note.tags.filter((t) => t !== tag),
+          updatedAt: now(),
+        };
+        nextById.set(note.id, nextNote);
+        changed.push(putNoteRecord(nextNote));
+      }
+      await Promise.all(changed);
+      for (const note of state.notes) {
+        const nextNote = nextById.get(note.id);
+        if (nextNote) Object.assign(note, nextNote);
+      }
+      if (state.tagFilter === tag) state.tagFilter = null;
+      state.pendingTagDelete = null;
+      closeDialog(els.tagDeleteDialog);
+      renderAll();
+      renderTagManager();
+    });
+  }
+
+  // -------- PWA --------
+  function showWaitingUpdate(worker) {
+    state.waitingWorker = worker ||
+      (state.serviceWorkerRegistration && state.serviceWorkerRegistration.waiting) ||
+      state.waitingWorker;
+    if (!state.waitingWorker || !navigator.serviceWorker.controller) return;
+    els.pwaUpdateNotice.hidden = false;
+  }
+
+  async function registerServiceWorker() {
+    if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
+    const version = encodeURIComponent(window.SCRATCHPAD_VERSION || 'dev');
+    try {
+      // Root-absolute: index.html is also served for unrecognized deep paths
+      // (the /s/* router's catch-all), where a relative URL would resolve
+      // under /s/ and register nothing.
+      const registration = await navigator.serviceWorker.register('/service-worker.js?v=' + version);
+      state.serviceWorkerRegistration = registration;
+      if (registration.waiting && navigator.serviceWorker.controller) showWaitingUpdate(registration.waiting);
+      if (typeof registration.addEventListener === 'function') {
+        registration.addEventListener('updatefound', () => {
+          const installing = registration.installing;
+          if (!installing || typeof installing.addEventListener !== 'function') return;
+          installing.addEventListener('statechange', () => {
+            if (installing.state === 'installed' && navigator.serviceWorker.controller) showWaitingUpdate(registration.waiting || installing);
+          });
+        });
+      }
+      if (typeof navigator.serviceWorker.addEventListener === 'function') {
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (!state.reloadForUpdate) return;
+          state.reloadForUpdate = false;
+          window.location.reload();
+        });
+      }
+      return registration;
+    } catch (e) {
+      console.warn('Service worker registration failed', e);
+      return null;
+    }
+  }
+
+  async function checkForUpdates() {
+    // The updatefound listener that shows the reload notice lives on this registration.
+    if (!state.serviceWorkerRegistration) return toast('Update checks are unavailable in this browser.', { tone: 'info' });
+    const current = window.SCRATCHPAD_VERSION || 'dev';
+    const latest = await window.ScratchpadSettings.newerVersion(current);
+    // A new script URL makes the browser install that release's worker.
+    if (latest) await navigator.serviceWorker.register('/service-worker.js?v=' + encodeURIComponent(latest));
+    showWaitingUpdate();
+    const message = latest ? 'Scratchpad ' + latest + ' is downloading.' : 'Scratchpad ' + current + ' is the latest version.';
+    toast(message, { tone: 'info' });
+  }
+
+  function messageServiceWorker(worker, message) {
+    return new Promise((resolve, reject) => {
+      if (!worker || typeof worker.postMessage !== 'function') {
+        reject(new Error('No active service worker'));
+        return;
+      }
+      const channel = new MessageChannel();
+      const timeout = setTimeout(() => reject(new Error('Service worker response timed out')), 8000);
+      channel.port1.onmessage = (event) => {
+        clearTimeout(timeout);
+        if (event.data && event.data.ok) resolve(event.data);
+        else reject(new Error('Service worker refresh failed'));
+      };
+      worker.postMessage(message, [channel.port2]);
+    });
+  }
+
+  async function refreshOfflineCopy() {
+    const registration = state.serviceWorkerRegistration ||
+      (navigator.serviceWorker.getRegistration && await navigator.serviceWorker.getRegistration());
+    const worker = (registration && registration.active) || navigator.serviceWorker.controller;
+    await messageServiceWorker(worker, { type: 'REFRESH_CACHE' });
+    toast('Offline copy refreshed.');
+  }
+
+  window.ScratchpadPWA = { showWaitingUpdate };
+
+  // -------- Event wiring --------
+  function bindEvents() {
+    const onSearch = debounce(() => {
+      const query = window.ScratchpadCommandBar.noteQuery(els.search.value);
+      if (state.search === query) return; // Arrow/Enter already rendered it; re-rendering drops row focus.
+      state.search = query;
+      renderAll();
+    }, 150);
+    els.search.addEventListener('input', onSearch);
+    window.ScratchpadSwipeRow.attach(els.noteList, { describe: swipeSidesFor, onAction: runSwipeAction });
+    SearchView.bindKeyboard({
+      input: els.search,
+      list: els.noteList,
+      isSearching: () => !!state.search.trim(),
+      hasActiveFilters: () => !!(state.search || state.tagFilter),
+      sync: () => {
+        if (state.search === window.ScratchpadCommandBar.noteQuery(els.search.value)) return;
+        state.search = window.ScratchpadCommandBar.noteQuery(els.search.value);
+        renderAll();
+      },
+      clear: clearSearchResults,
+    });
+
+    els.clearFilter.addEventListener('click', () => setTagFilter(null));
+    els.clearSearchBtn.addEventListener('click', clearAllFilters);
+    els.activeNotesView.addEventListener('click', () => setView('active'));
+    els.archiveView.addEventListener('click', () => setView('archive'));
+    els.trashView.addEventListener('click', () => setView('trash'));
+    els.viewMenuBtn.addEventListener('click', () => viewMenuController.toggle());
+    els.viewMenu.addEventListener('click', () => viewMenuController.close());
+    els.homeView.addEventListener('click', HomeDesk.goHome);
+    els.folderSwitcherBtn.addEventListener('click', toggleFolderSwitcher);
+    els.folderSwitcherSearch.addEventListener('input', () => {
+      state.folderSwitcherQuery = els.folderSwitcherSearch.value;
+      renderFolderSwitcher();
+    });
+    els.folderSwitcherNew.addEventListener('click', () => {
+      closeFolderSwitcher();
+      openFolderDialog(null);
+    });
+    els.folderDialogSave.addEventListener('click', () => { saveFolderDialog(); });
+    els.folderNameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        saveFolderDialog();
+      }
+    });
+    els.folderMenu.addEventListener('click', (e) => {
+      const item = e.target.closest('[role="menuitem"]');
+      if (item) runFolderMenuAction(item.getAttribute('data-action'));
+    });
+    els.folderDeleteKeep.addEventListener('click', () => { applyFolderDelete('keep'); });
+    els.folderDeleteTrash.addEventListener('click', () => { applyFolderDelete('trash'); });
+    els.manageTags.addEventListener('click', openTagManager);
+    els.listMenuBtn.addEventListener('click', toggleListMenu);
+    els.listMenu.addEventListener('click', (e) => {
+      if (e.target.closest('[role="menuitem"], [role="menuitemcheckbox"]')) closeListMenu();
+    });
+    els.newFolderMenuBtn.addEventListener('click', () => openFolderDialog(null));
+
+    els.newNote.addEventListener('click', createNote);
+    els.todayNote.addEventListener('click', openTodayNote);
+    els.bulkToggle.addEventListener('click', toggleBulkMode);
+    els.focusExitBtn.addEventListener('click', toggleFocusMode);
+    els.focusModeBtn.addEventListener('click', toggleFocusMode);
+    els.commandPaletteBtn.addEventListener('click', openCommandPalette);
+    window.ScratchpadCommandBar.attach({ input: els.search, commands: commandDefinitions, matches: Search.matchesLoose });
+    els.emptyNewNote.addEventListener('click', createNote);
+    els.emptyImportNotes.addEventListener('click', () => els.importFile.click());
+    els.emptyViewArchive.addEventListener('click', () => setView('archive'));
+
+    els.titleInput.addEventListener('input', handleTitleInput);
+    els.titleInput.addEventListener('blur', async () => {
+      const note = getNote(state.selectedId);
+      if (!note || isTrashed(note)) return;
+      const v = els.titleInput.value.trim();
+      if (state.editing) {
+        persistDraftDebounced();
+        return;
+      }
+      if ((note.title || '') === v) {
+        state.dirty = false;
+        els.dirtyIndicator.hidden = true;
+        return;
+      }
+      await withBusy('title-save', [els.titleInput], 'Title update failed.', async () => {
+        const previousDisplayTitle = deriveTitle(note);
+        const nextNote = { ...note, title: v, updatedAt: now() };
+        await putNoteRecord(nextNote);
+        Object.assign(note, nextNote);
+        state.dirty = false;
+        renderSidebar();
+        els.dirtyIndicator.hidden = true;
+        await maybeOfferLinkRewrite(previousDisplayTitle, deriveTitle(nextNote), note.id);
+      });
+    });
+
+    els.pinToggle.addEventListener('click', togglePin);
+
+    els.editBtn.addEventListener('click', enterEditMode);
+    els.saveBtn.addEventListener('click', saveCurrent);
+    els.historyBtn.addEventListener('click', openHistoryDialog);
+
+    els.editor.addEventListener('input', markDirty);
+    els.editor.addEventListener('input', updateWikilinkSuggest);
+    els.editor.addEventListener('keydown', onEditorSuggestKey);
+    els.editor.addEventListener('blur', () => setTimeout(closeWikilinkSuggest, 0));
+    els.editor.addEventListener('click', () => { if (wikilinkSuggestState.open) updateWikilinkSuggest(); });
+    els.rendered.addEventListener('click', onRenderedClick);
+    els.rendered.addEventListener('keydown', onRenderedKey);
+    els.formatToolbar.addEventListener('mousedown', (e) => {
+      const button = e.target.closest && e.target.closest('[data-format]');
+      if (button) e.preventDefault();
+    });
+    els.formatToolbar.addEventListener('click', (e) => {
+      const button = e.target.closest && e.target.closest('[data-format]');
+      if (!button) return;
+      applyEditorFormat(button.dataset.format);
+    });
+
+    els.shareBtn.addEventListener('click', openShareDialog);
+    els.shareCopy.addEventListener('click', copyShare);
+    els.shareEmail.addEventListener('click', emailShare);
+    els.createShareLink.addEventListener('click', createPublicShare);
+
+    els.deleteBtn.addEventListener('click', () => openDialog(els.deleteDialog));
+    els.archiveNoteBtn.addEventListener('click', () => setCurrentArchiveState(true));
+    els.unarchiveNoteBtn.addEventListener('click', () => setCurrentArchiveState(false));
+    els.confirmDelete.addEventListener('click', async () => {
+      closeDialog(els.deleteDialog);
+      await moveCurrentToTrash();
+    });
+    els.restoreBtn.addEventListener('click', restoreCurrentFromTrash);
+    els.permanentDeleteBtn.addEventListener('click', async () => {
+      if (await confirmPermanentDelete(1)) await permanentlyDeleteCurrent();
+    });
+    els.confirmEmptyTrash.addEventListener('click', async () => {
+      closeDialog(els.emptyTrashDialog);
+      await emptyTrash();
+    });
+
+    els.backToList.addEventListener('click', async () => {
+      if (state.editing && state.dirty) {
+        const ok = await confirmDiscard();
+        if (!ok) return;
+        await discardCurrentDraft();
+        state.editing = false;
+        state.dirty = false;
+      }
+      state.mobileView = 'list';
+      syncMobileView();
+      focusMobilePane();
+    });
+
+    els.tagBar.addEventListener('mousedown', (e) => {
+      // When the tag input is open, keep it focused until a neighboring tag
+      // button's click fires. Otherwise Firefox can process the blur timer
+      // between pointer-down and click, collapsing the bar and detaching the
+      // intended target before its action runs.
+      if (!els.tagInput.hidden && e.target.closest('button')) e.preventDefault();
+    });
+    els.tagInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ',') {
+        e.preventDefault();
+        addTagFromInput();
+        els.tagInput.focus();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        els.tagInput.value = '';
+        collapseTagInput();
+      }
+    });
+    els.tagInput.addEventListener('blur', () => {
+      if (els.tagInput.value.trim()) addTagFromInput();
+      setTimeout(() => {
+        if (document.activeElement !== els.tagInput) collapseTagInput();
+      }, 0);
+    });
+    els.tagAddEmpty.addEventListener('click', openTagInput);
+    els.tagAddPlus.addEventListener('click', openTagInput);
+
+    els.overflowBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleOverflowMenu();
+    });
+    els.overflowMenu.addEventListener('click', (e) => {
+      if (e.target.closest('[role="menuitem"], [role="menuitemcheckbox"]')) closeOverflowMenu();
+    });
+    els.exportOverflowBtn.addEventListener('click', () => {
+      closeOverflowMenu();
+      exportMarkdownZip(getNote(state.selectedId));
+    });
+    els.printOverflowBtn.addEventListener('click', () => {
+      closeOverflowMenu();
+      window.print();
+    });
+    els.moveNoteOverflow.addEventListener('click', () => {
+      closeOverflowMenu();
+      if (state.selectedId) openMoveDialog([state.selectedId]);
+    });
+    els.duplicateOverflowBtn.addEventListener('click', () => {
+      closeOverflowMenu();
+      duplicateCurrentNote();
+    });
+    els.discardOverflowBtn.addEventListener('click', async () => {
+      closeOverflowMenu();
+      if (!state.editing) return;
+      if (state.dirty) {
+        const ok = await confirmDiscard();
+        if (!ok) return;
+        await discardCurrentDraft();
+      }
+      state.editing = false;
+      state.dirty = false;
+      renderEditor();
+    });
+
+    els.openAbout.addEventListener('click', openAboutDialog);
+    els.openSettings.addEventListener('click', openSettingsDialog);
+    syncSettingsChoices = window.ScratchpadSettings.bindChoices(els.settingsDialog);
+    els.exportBtn.addEventListener('click', () => { exportAll(); });
+    els.exportEncryptedBtn.addEventListener('click', openEncryptedExportDialog);
+    els.exportMarkdownBtn.addEventListener('click', () => { exportMarkdownZip(); });
+    els.importBtn.addEventListener('click', () => els.importFile.click());
+    els.backupChip.addEventListener('click', toggleBackupMenu);
+    els.backupMenu.addEventListener('click', (e) => {
+      if (e.target.closest('[role="menuitem"]')) closeBackupMenu();
+    });
+    els.protectStorageBtn.addEventListener('click', requestStorageProtection);
+    els.checkUpdatesBtn.addEventListener('click', () => withBusy(
+      'check-updates',
+      [els.checkUpdatesBtn],
+      'Update check failed.',
+      checkForUpdates
+    ));
+    els.refreshOfflineCopyBtn.addEventListener('click', () => withBusy(
+      'refresh-offline-copy',
+      [els.refreshOfflineCopyBtn],
+      'Offline copy refresh failed.',
+      refreshOfflineCopy
+    ));
+    els.eraseLocalDataBtn.addEventListener('click', openEraseLocalDataDialog);
+    els.confirmEraseLocalData.addEventListener('click', eraseLocalData);
+    els.eraseConfirmation.addEventListener('input', () => {
+      els.confirmEraseLocalData.disabled = els.eraseConfirmation.value !== 'ERASE';
+    });
+    els.confirmEncryptedExport.addEventListener('click', exportEncryptedBackup);
+    els.confirmEncryptedImport.addEventListener('click', unlockEncryptedBackup);
+    els.backupPassphraseShow.addEventListener('change', () => {
+      const type = els.backupPassphraseShow.checked ? 'text' : 'password';
+      els.backupPassphrase.type = type;
+      els.backupPassphraseConfirm.type = type;
+    });
+    for (const button of els.backupPassphraseDialog.querySelectorAll('[data-dialog-close]')) {
+      button.addEventListener('click', clearPassphraseSession);
+    }
+    els.backupPassphraseDialog.addEventListener('cancel', clearPassphraseSession);
+    els.importFile.addEventListener('change', async () => {
+      const files = els.importFile.files;
+      if (files && files.length) await importFromFiles(files);
+      els.importFile.value = '';
+    });
+    els.pwaUpdateLater.addEventListener('click', () => {
+      els.pwaUpdateNotice.hidden = true;
+    });
+    els.pwaUpdateReload.addEventListener('click', () => {
+      const worker = state.waitingWorker ||
+        (state.serviceWorkerRegistration && state.serviceWorkerRegistration.waiting);
+      if (!worker) return;
+      state.reloadForUpdate = true;
+      els.pwaUpdateNotice.hidden = true;
+      worker.postMessage({ type: 'SKIP_WAITING' });
+    });
+    els.confirmImport.addEventListener('click', confirmImport);
+    for (const radio of document.querySelectorAll('input[name="import-conflict-mode"]')) {
+      radio.addEventListener('change', updateImportOutcome);
+    }
+    els.confirmTagDelete.addEventListener('click', deletePendingTag);
+    els.bulkApplyTag.addEventListener('click', applyBulkTag);
+    els.bulkTagInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        applyBulkTag();
+      }
+    });
+    els.commandPaletteInput.addEventListener('input', () => {
+      state.commandIndex = 0;
+      renderCommandPaletteList();
+    });
+    els.commandPaletteInput.addEventListener('keydown', onCommandPaletteKey);
+    els.commandPaletteDialog.addEventListener('close', () => {
+      els.commandPaletteInput.setAttribute('aria-expanded', 'false');
+      els.commandPaletteInput.removeAttribute('aria-activedescendant');
+    });
+    els.quickCaptureInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitQuickCapture();
+      }
+    });
+    els.quickCaptureSubmit.addEventListener('click', submitQuickCapture);
+    els.quickCaptureInput.addEventListener('input', updateCapturePreview);
+
+    window.addEventListener('keydown', onGlobalKey);
+    window.addEventListener('resize', debounce(syncMobileView, 100));
+
+    bindDialogClosers();
+  }
+
+  function isTypingTarget(t) {
+    if (!t) return false;
+    const tag = (t.tagName || '').toUpperCase();
+    return tag === 'INPUT' || tag === 'TEXTAREA' || t.isContentEditable;
+  }
+
+  function onGlobalKey(e) {
+    const meta = e.metaKey || e.ctrlKey;
+
+    if (meta && (e.key === 's' || e.key === 'S')) {
+      if (state.editing) {
+        e.preventDefault();
+        saveCurrent();
+      }
+      return;
+    }
+
+    if (meta && (e.key === 'n' || e.key === 'N')) {
+      e.preventDefault();
+      createNote();
+      return;
+    }
+
+    if (meta && !e.shiftKey && (e.key === 'e' || e.key === 'E')) {
+      if (document.querySelector('dialog[open]')) return;
+      e.preventDefault();
+      enterEditMode();
+      return;
+    }
+
+    if (meta && e.shiftKey && (e.key === 'd' || e.key === 'D')) {
+      e.preventDefault();
+      openTodayNote();
+      return;
+    }
+
+    if (meta && e.shiftKey && e.code === 'Space') {
+      e.preventDefault();
+      if (!els.quickCaptureDialog.open) openQuickCapture();
+      return;
+    }
+
+    if (meta && e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+      e.preventDefault();
+      openCommandPalette();
+      return;
+    }
+
+    if (meta && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+      e.preventDefault();
+      toggleFocusMode();
+      return;
+    }
+
+    if (meta && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      els.search.focus();
+      els.search.select();
+      return;
+    }
+
+    if (e.key === '/' && !isTypingTarget(e.target)) {
+      e.preventDefault();
+      els.search.focus();
+      els.search.select();
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      if (document.activeElement === els.search) {
+        if (state.search || state.tagFilter) {
+          e.preventDefault();
+          clearAllFilters();
+        } else {
+          els.search.blur();
+        }
+        return;
+      }
+      if (state.editing) {
+        e.preventDefault();
+        if (state.dirty) {
+          confirmDiscard().then(async (ok) => {
+            if (ok) {
+              await discardCurrentDraft();
+              state.editing = false;
+              state.dirty = false;
+              renderEditor();
+            }
+          });
+        } else {
+          state.editing = false;
+          renderEditor();
+        }
+      }
+    }
+  }
+
+  // -------- Boot --------
+  // PWA shortcuts and the share viewer's save button land on /?action=<name>. Handle once at boot, then clean
+  // the URL so reload/bookmark behaves normally. The service worker matches navigations by pathname, so these work offline.
+  async function handleActionParam() {
+    const params = new URLSearchParams(window.location.search);
+    const action = params.get('action');
+    if (!action) return;
+    window.history.replaceState(null, '', window.location.pathname);
+    const handler = new Map([['new', () => createNote()], ['today', openTodayNote], ['capture', openQuickCapture], ['save-shared', () => window.ScratchpadSharedCopy && window.ScratchpadSharedCopy.saveStashed()]]).get(action);
+    if (handler) await handler();
+  }
+
+  async function init() {
+    const seeded = window.ScratchpadSeed ? await window.ScratchpadSeed.maybeSeedFirstRun(DB, now()) : false;
+    Markdown.setWikilinkResolver((target) => {
+      const wanted = (target || '').trim().toLowerCase();
+      if (!wanted) return null;
+      const matches = sortNotes(state.notes.filter((n) => !isTrashed(n) && deriveTitle(n).trim().toLowerCase() === wanted));
+      return matches.length ? matches[0].id : null;
+    });
+    initCrossTabSync();
+    if (window.ScratchpadFind) window.ScratchpadFind.init({ editor: els.editor, onToast: toast });
+    if (window.ScratchpadPaste) window.ScratchpadPaste.bind(els.editor);
+    if (window.ScratchpadMentions) window.ScratchpadMentions.init({ notes: () => state.notes, editing: () => state.editing, deriveTitle, isTrashed, isArchived,
+      openNote: openNoteFromCommand, mutateNoteBody, getDrafts: () => DB.getAllDrafts(), rerender: renderEditor, toast });
+    if (window.ScratchpadTemplates) window.ScratchpadTemplates.init({ notes: () => state.notes, folders: () => state.folders, filingFolderId: () => state.folderViewId,
+      isDailyNotesFolder, folderById, uuid, now, normalizeNote, putNoteRecord, addNote: (note) => state.notes.push(note),
+      openNote: openNoteFromCommand, deriveTitle, toast, createFolder, rerender: renderAll });
+    window.ScratchpadBreadcrumb.init({ isTrashed, isArchived, deriveTitle, noteFolderId, folderDisplayName, goHome: HomeDesk.goHome, openFolder: (id) => setFolderView(id || VIRTUAL_FOLDER_KEY) });
+    HomeDesk.init({ state, seeded, now, deriveTitle, isArchived, isTrashed, noteFolderId, folderById, folderDisplayName, todayNote: () => findDailyNote(todayKey()),
+      createNote, openNote: selectNote, openToday: openTodayNote, openCapture: openQuickCapture, openPalette: openCommandPalette, setFolderView,
+      clearFilters: clearAllFilters, setTagFilter, openTagManager, confirmDiscard, discardDraft: discardCurrentDraft });
+    if (window.ScratchpadSharedCopy) window.ScratchpadSharedCopy.init({ notes: () => state.notes, isTrashed, normalizeNote, normalizeTag, putNoteRecord, uuid, now, toast,
+      addNote: (note) => state.notes.push(note), openNote: (id) => { if (state.folderViewId) setFolderView(null, false); return openNoteFromCommand(id); }, limits: { title: NOTE_TITLE_MAX, body: NOTE_BODY_MAX, tag: NOTE_TAG_MAX, tags: NOTE_TAGS_MAX } });
+    if (window.ScratchpadAttachments) {
+      Markdown.setAttachmentResolver((id) => window.ScratchpadAttachments.resolve(id));
+      window.ScratchpadAttachments.init({ noteId: () => state.selectedId, editing: () => state.editing, uuid, now, toast, rerender: renderEditor, insert: window.ScratchpadPaste.insert, editor: els.editor });
+    }
+    if (window.ScratchpadLinkedFolder) window.ScratchpadLinkedFolder.init({
+      notes: () => state.notes, folders: () => state.folders, noteToMarkdown, parseMarkdownNote, storeRevision, putNoteRecord,
+      deriveTitle, slugify, noteFolderId, folderDisplayName, isArchived, isTrashed, uuid, now, toast, reload: loadAll,
+    });
+    window.ScratchpadShareManager.init({ db: DB, crypto: ScratchpadCrypto });
+    window.ScratchpadShareControls.init({ manager: window.ScratchpadShareManager, db: DB,
+      note: () => { const note = getNote(state.selectedId); return note && !isTrashed(note) ? note : null; }, dirty: () => state.dirty,
+      getNote: (id) => DB.get(id).then((note) => note && !isTrashed(note) ? note : undefined), refreshShared: syncSharedNoteIds, render: renderAll, toast, busy: withBusy, renderMarkdown: Markdown.renderMarkdownInto });
+    bindEvents();
+    try {
+      await purgeExpiredTrash();
+      await DB.pruneExpiredShares(now());
+      await syncSharedNoteIds();
+      await loadAll();
+      await handleActionParam();
+      registerServiceWorker();
+    } catch (e) {
+      console.error('Failed to load notes', e);
+      toast('Scratchpad could not open its local database. Your browser may be blocking storage.', { tone: 'error', persist: true });
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();

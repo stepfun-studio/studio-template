@@ -1,0 +1,130 @@
+// @ts-check
+const { test, expect } = require('@playwright/test');
+const { openCommandPalette } = require('./helpers');
+
+const SECTION_IDS = [
+  'first-five-minutes',
+  'home',
+  'markdown',
+  'task-lists',
+  'images',
+  'daily-notes',
+  'linking',
+  'folders',
+  'archive-trash',
+  'organizing',
+  'history-drafts',
+  'backups',
+  'linked-folder',
+  'privacy-controls',
+  'offline',
+  'shortcuts',
+];
+
+test.describe('user guide page', () => {
+  test('loads with title and every TOC section', async ({ page, context }) => {
+    await page.goto('/guide.html');
+    await expect(page.locator('h1')).toContainText('How to use Scratchpad');
+    for (const id of SECTION_IDS) {
+      await expect(page.locator('#' + id), id).toBeVisible();
+    }
+  });
+
+  test('documents Home, the folder switcher, and global search', async ({ page, context }) => {
+    await page.goto('/guide.html');
+    const folders = page.locator('#folders').locator('..');
+    await expect(folders).toContainText('Switch folders');
+    await expect(folders).toContainText('Home');
+    await expect(folders).toContainText('searchable picker');
+    await expect(folders).toContainText('relevance-ranked result list');
+    await expect(page.locator('#organizing').locator('..')).toContainText('ranks title matches first');
+  });
+
+  test('TOC anchor navigates to its section', async ({ page, context }) => {
+    await page.goto('/guide.html');
+    await page.locator('.guide-toc a[href="#task-lists"]').click();
+    expect(new URL(page.url()).hash).toBe('#task-lists');
+    // Inkwell sets html { scroll-behavior: smooth }, so the jump animates —
+    // poll until the section heading lands in the viewport.
+    await page.waitForFunction(() => {
+      const el = document.getElementById('task-lists');
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      return rect.top >= 0 && rect.top < window.innerHeight;
+    });
+  });
+
+  test('every static page footer links to the guide', async ({ page, context }) => {
+    // index.html has no .footer-nav — the app's entry point is the About
+    // dialog link, covered by its own test below.
+    for (const path of ['/about.html', '/privacy.html', '/terms.html', '/guide.html']) {
+      await page.goto(path);
+      await expect(page.locator('.footer-nav a[href="guide.html"]'), path).toBeAttached();
+    }
+  });
+
+  test('about page links to the guide prominently', async ({ page, context }) => {
+    await page.goto('/about.html');
+    await expect(page.locator('a[href="guide.html"]', { hasText: /user guide/i }).first()).toBeVisible();
+  });
+
+  // This test failed in every browser for weeks, and the failure was blamed on
+  // popup attach under machine load. The real cause was app code: feature modules
+  // lacked a script-level 'use strict', so find-replace.js's own open() replaced
+  // window.open and the palette command never reached the browser.
+  // tests/script-scope.spec.js now guards that directly.
+  test.describe('guide popup (pristine process)', () => {
+    test.describe.configure({ retries: 2 });
+    test('command palette opens the guide in a new tab', async ({ browser, baseURL }) => {
+      const fresh = await browser.browserType().launch();
+      // The configured baseURL follows SCRATCHPAD_TEST_PORT, unlike a hard-coded port.
+      const context = await fresh.newContext({ baseURL });
+      const page = await context.newPage();
+      try {
+        await page.addInitScript(() => localStorage.setItem('scratchpad-visited', '1'));
+        await page.goto('/');
+        await openCommandPalette(page);
+        await page.locator('#command-palette-input').fill('guide');
+        const popupPromise = context.waitForEvent('page');
+        await page.locator('.command-palette-item', { hasText: 'Open user guide' }).click();
+        const popup = await popupPromise;
+        await popup.waitForLoadState();
+        expect(new URL(popup.url()).pathname).toBe('/guide.html');
+      } finally {
+        await fresh.close();
+      }
+    });
+  });
+
+  test('About dialog links to the guide', async ({ page, context }) => {
+    await page.addInitScript(() => localStorage.setItem('scratchpad-visited', '1'));
+    await page.goto('/');
+    await page.locator('#open-about').click();
+    const link = page.locator('#about-dialog a[href="guide.html"]');
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute('target', '_blank');
+  });
+
+  test('guide.html makes no cross-origin requests and ships in the offline shell', async ({ page, baseURL }) => {
+    const external = [];
+    const origin = new URL(String(baseURL)).origin;
+    page.on('request', (req) => {
+      if (new URL(req.url()).origin !== origin) external.push(req.url());
+    });
+    await page.goto('/guide.html', { waitUntil: 'networkidle' });
+    expect(external).toEqual([]);
+    // The service worker's app shell must include the guide so it works offline.
+    const swSource = await page.evaluate(() => fetch('/public/service-worker.js').then((r) => r.text()));
+    expect(swSource).toContain("'/guide.html'");
+  });
+
+  test('theme toggle cycles and persists across reload', async ({ page, context }) => {
+    await page.goto('/guide.html');
+    const toggle = page.locator('#theme-toggle');
+    await toggle.click(); // auto -> light
+    await toggle.click(); // light -> dark
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  });
+});

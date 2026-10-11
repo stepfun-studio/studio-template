@@ -1,0 +1,595 @@
+/* === Reset === */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--bg-color, #C8973A);
+    color: white;
+    overflow: hidden;
+}
+
+/* === Top Nav === */
+.top-nav {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 50;
+}
+
+.menu-button {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 1.5em;
+    cursor: pointer;
+    opacity: 0.9;
+}
+.menu-button:hover { opacity: 1; }
+
+/* === GitHub Link === */
+.github-link {
+    position: fixed;
+    top: 22px;
+    left: 22px;
+    z-index: 50;
+    color: white;
+    opacity: 0.85;
+    display: inline-flex;
+    transition: opacity 0.2s;
+}
+.github-link:hover { opacity: 1; }
+
+/* === Timer Stage === */
+.timer-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+/* === Clock Face === */
+.clock-face {
+    width: 72vmin;
+    height: 72vmin;
+    max-width: 340px;
+    max-height: 340px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    margin-bottom: 36px;
+}
+
+/* === Tick Marks === */
+.tick {
+    position: absolute;
+    width: 3px;
+    height: 14px;
+    background: rgba(255, 255, 255, 0.85);
+    border-radius: 2px;
+    left: calc(50% - 1.5px);
+    top: -16px;
+    pointer-events: none;
+    transition: opacity 0.4s ease;
+}
+.tick.tick-hidden {
+    opacity: 0;
+}
+
+/* === Outer Ring === */
+.outer-ring {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: transparent;
+    border: 8px solid white;
+    position: relative;
+}
+
+/* === Inner Circle === */
+.inner-circle {
+    width: calc(100% - 16px);
+    height: calc(100% - 16px);
+    border-radius: 50%;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+/* === Sweep Canvas === */
+.sweep-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    z-index: 1;
+    transition: opacity 0.35s ease;
+}
+
+/* === Play/Pause Button === */
+.play-button {
+    background: none;
+    border: none;
+    font-size: 4.5em;
+    color: white;
+    cursor: pointer;
+    line-height: 1;
+    padding-left: 10px;
+    position: relative;
+    z-index: 2;
+    transition: transform 0.1s, opacity 0.25s ease;
+}
+.play-button:hover { transform: scale(1.08); }
+.play-button:active { transform: scale(0.95); }
+
+.inner-circle.running .play-button {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.inner-circle.paused .sweep-canvas {
+    opacity: 0.2;
+}
+.inner-circle.paused .play-button {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* === Dot Selectors === */
+.dot-selectors {
+    display: flex;
+    flex-direction: row;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 340px;
+    margin-bottom: 36px;
+}
+
+.dot-group {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+}
+
+.dot-group .dot {
+    width: 8px;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.35);
+    border-radius: 50%;
+    transition: background-color 0.3s, transform 0.3s;
+}
+
+.dot-group .active {
+    background: white;
+    transform: scale(1.3);
+}
+
+/* === Session Info Area === */
+.session-info-area {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    margin-bottom: 44px;
+}
+
+#idle-label,
+#running-display {
+    grid-area: 1 / 1;
+    transition: opacity 0.25s ease;
+}
+
+/* === Session Label (idle) === */
+.session-label {
+    font-size: 0.85em;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+}
+
+#session-type { font-weight: bold; opacity: 0.9; }
+#session-duration { font-weight: 400; opacity: 0.7; }
+
+.session-label:hover #session-type,
+.session-label:hover #session-duration { opacity: 1; }
+
+@keyframes mode-out-down {
+    to { opacity: 0; transform: translateY(10px); }
+}
+@keyframes mode-in-down {
+    from { opacity: 0; transform: translateY(-10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes mode-out-up {
+    to { opacity: 0; transform: translateY(-10px); }
+}
+@keyframes mode-in-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.mode-text.mode-anim-out-down { animation: mode-out-down 0.18s ease forwards; }
+.mode-text.mode-anim-in-down  { animation: mode-in-down  0.22s ease; }
+.mode-text.mode-anim-out-up   { animation: mode-out-up   0.18s ease forwards; }
+.mode-text.mode-anim-in-up    { animation: mode-in-up    0.22s ease; }
+
+.mode-text {
+    display: inline-block;
+    min-width: 13em;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.mode-stepper {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    line-height: 0;
+}
+
+.mode-step {
+    background: none;
+    border: none;
+    color: white;
+    opacity: 0.6;
+    padding: 1px 4px;
+    cursor: pointer;
+    line-height: 0;
+    transition: opacity 0.15s;
+}
+.mode-step:hover { opacity: 1; }
+.mode-step svg { display: block; }
+
+/* === Running Display === */
+.running-display {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    text-align: center;
+}
+
+.running-session-name {
+    font-size: 0.85em;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: bold;
+    opacity: 0.9;
+}
+
+.running-time {
+    font-size: 1.6em;
+    font-weight: 300;
+    opacity: 0.95;
+    margin-top: 4px;
+}
+
+/* === Reset Button === */
+.reset-button {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    border-radius: 999px;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 0.8em;
+    cursor: pointer;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    padding: 11px 32px;
+    transition: color 0.2s, border-color 0.2s, opacity 0.25s ease;
+}
+.reset-button:hover {
+    color: white;
+    border-color: white;
+}
+
+/* === Opacity-based hiding === */
+.invisible {
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+/* === Utility === */
+.hidden { display: none !important; }
+
+/* ============================================================
+   SETTINGS PAGE
+   ============================================================ */
+
+.settings-page {
+    position: fixed;
+    inset: 0;
+    background-color: var(--bg-color, #C8973A);
+    z-index: 200;
+    overflow-y: auto;
+    color: white;
+}
+
+.settings-page:not(.hidden) {
+    animation: settingsFadeIn 0.2s ease;
+}
+
+@keyframes settingsFadeIn {
+    from { opacity: 0; transform: translateX(16px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+
+.settings-header {
+    padding: 12px 16px 0;
+    position: sticky;
+    top: 0;
+    background-color: var(--bg-color, #C8973A);
+    z-index: 10;
+}
+
+.settings-back {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 3em;
+    cursor: pointer;
+    line-height: 1;
+    opacity: 0.85;
+    padding: 0 4px;
+}
+.settings-back:hover { opacity: 1; }
+
+.settings-content {
+    padding: 8px 20px 48px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+.settings-section-title {
+    font-size: 0.72em;
+    letter-spacing: 0.15em;
+    opacity: 0.7;
+    text-align: center;
+    margin-bottom: 12px;
+    font-weight: 400;
+}
+
+/* --- Duration Tiles --- */
+.duration-tiles {
+    display: flex;
+    gap: 10px;
+}
+
+.duration-tile {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 10px;
+    padding: 20px 8px 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+}
+.duration-tile:hover { background: rgba(255, 255, 255, 0.26); }
+
+.duration-value {
+    font-size: 3em;
+    font-weight: 300;
+    line-height: 1;
+}
+
+.duration-label {
+    font-size: 0.65em;
+    letter-spacing: 0.1em;
+    opacity: 0.8;
+    text-align: center;
+}
+
+/* Inline number editor (replaces value span) */
+input.num-edit {
+    background: none;
+    border: none;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.6);
+    color: white;
+    text-align: center;
+    outline: none;
+    width: 3ch;
+    -moz-appearance: textfield;
+}
+input.num-edit::-webkit-inner-spin-button,
+input.num-edit::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+/* --- Color Grid --- */
+.color-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    background: transparent;
+    padding: 0;
+}
+
+.color-swatch {
+    aspect-ratio: 1;
+    background: white;
+    border-radius: 12px;
+    cursor: pointer;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.1s, background 0.15s;
+}
+.color-swatch:hover { transform: scale(1.06); }
+
+.swatch-dot {
+    width: 64%;
+    height: 64%;
+    border-radius: 50%;
+    pointer-events: none;
+    transition: opacity 0.15s;
+}
+
+.swatch-check {
+    display: none;
+    position: absolute;
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4em;
+    color: white;
+    pointer-events: none;
+    line-height: 1;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.color-swatch.selected .swatch-check { display: flex; }
+
+/* --- Sound Tiles --- */
+.sound-tiles {
+    display: flex;
+    gap: 10px;
+}
+
+.sound-tile {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 10px;
+    padding: 24px 12px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    cursor: pointer;
+    transition: background 0.15s;
+    text-align: center;
+    user-select: none;
+}
+.sound-tile:hover { background: rgba(255, 255, 255, 0.26); }
+
+.sound-icon-circle {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5em;
+    color: rgba(255, 255, 255, 0.5);
+    transition: background 0.2s, color 0.2s;
+}
+
+.sound-tile.active .sound-icon-circle {
+    background: white;
+    color: var(--bg-color, #C8973A);
+}
+
+.sound-label {
+    font-size: 0.65em;
+    letter-spacing: 0.1em;
+    opacity: 0.85;
+}
+
+/* --- Pref Number Tiles --- */
+.pref-number-tiles {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.pref-number-tile {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 10px;
+    padding: 20px 8px 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+}
+.pref-number-tile:hover { background: rgba(255, 255, 255, 0.26); }
+
+.pref-number-value {
+    font-size: 3em;
+    font-weight: 300;
+    line-height: 1;
+}
+
+.pref-number-label {
+    font-size: 0.65em;
+    letter-spacing: 0.08em;
+    opacity: 0.8;
+    text-align: center;
+    line-height: 1.4;
+}
+
+/* --- Toggle Tiles --- */
+.toggle-tiles {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.toggle-tile {
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 10px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.toggle-opts {
+    display: flex;
+    gap: 20px;
+}
+
+.toggle-opt {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.25);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 1.3em;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, color 0.2s;
+    pointer-events: none;
+}
+
+.toggle-opt.active {
+    background: white;
+    color: var(--bg-color, #C8973A);
+}
+
+.toggle-label {
+    font-size: 0.7em;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    opacity: 0.9;
+}

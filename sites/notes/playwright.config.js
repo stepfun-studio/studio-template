@@ -1,0 +1,39 @@
+// @ts-check
+const { defineConfig, devices } = require('@playwright/test');
+
+// Override when something else owns 8080 (e.g. SCRATCHPAD_TEST_PORT=8091 npm test).
+const port = Number(process.env.SCRATCHPAD_TEST_PORT) || 8080;
+
+module.exports = defineConfig({
+  testDir: './tests',
+  timeout: 30_000,
+  expect: { timeout: 5_000 },
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 1 : undefined,
+  reporter: process.env.CI ? [['html'], ['list']] : 'list',
+  use: {
+    baseURL: 'http://127.0.0.1:' + port,
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
+  },
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+  ],
+  webServer: {
+    // scripts/dev-server.mjs serves only the deployable surface (the HTML
+    // shells, service-worker.js, public/**) with Host validation -- unlike
+    // python3 -m http.server, which exposed the whole working tree including
+    // .env.local and .git/ to any local process or DNS-rebinding page.
+    command: 'node scripts/dev-server.mjs ' + port,
+    url: 'http://127.0.0.1:' + port,
+    reuseExistingServer: !process.env.CI,
+    timeout: 30_000,
+    stdout: 'ignore',
+    stderr: 'ignore',
+  },
+});
