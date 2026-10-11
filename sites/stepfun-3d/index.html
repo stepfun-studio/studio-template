@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>阶跃星辰 · 星海藏馆 — StepFun Digital Pavilion</title>
+<meta name="description" content="阶跃星辰主题 3D 藏馆：三件开源数字藏品，悬浮于星海之中，可自由拖动、全方位凝视。" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cpath d='M20 3 L23.6 15.2 L36 20 L23.6 24.8 L20 37 L16.4 24.8 L4 20 L16.4 15.2 Z' fill='none' stroke='%23d9c39a' stroke-width='2'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300&family=Inter:wght@200;300;400;500&family=Noto+Serif+SC:wght@200;300;400&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./css/style.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "./lib/three.module.js",
+    "three/addons/": "./lib/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<!-- ══════════ 3D 舞台 ══════════ -->
+<canvas id="stage"></canvas>
+<div class="vignette" aria-hidden="true"></div>
+<div class="grain" aria-hidden="true"></div>
+
+<!-- ══════════ 顶部导航 ══════════ -->
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+      <defs>
+        <linearGradient id="bmGrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#f3e3c3"/><stop offset="1" stop-color="#8fd3ff"/>
+        </linearGradient>
+      </defs>
+      <path d="M20 3 L23.6 15.2 L36 20 L23.6 24.8 L20 37 L16.4 24.8 L4 20 L16.4 15.2 Z"
+            fill="none" stroke="url(#bmGrad)" stroke-width="1.1" stroke-linejoin="round"/>
+      <circle cx="20" cy="20" r="2.1" fill="url(#bmGrad)"/>
+    </svg>
+    <span class="brand-text">
+      <strong>阶跃星辰</strong>
+      <em>STEPFUN · DIGITAL PAVILION</em>
+    </span>
+  </div>
+  <nav class="nav">
+    <button class="nav-link" id="navExhibits" type="button">展品</button>
+    <button class="nav-link" id="navAbout" type="button">关于</button>
+  </nav>
+</header>
+
+<!-- ══════════ 展品铭牌 ══════════ -->
+<aside class="plaque" id="plaque">
+  <div class="plaque-inner" id="plaqueInner">
+    <div class="plaque-no"><span id="exNo">01</span><i>/</i><span id="exTotal">03</span></div>
+    <h1 class="plaque-title" id="exTitle">探索者头盔</h1>
+    <p class="plaque-en" id="exEn">THE EXPLORER</p>
+    <p class="plaque-tagline" id="exTagline">为星海远征而铸</p>
+    <p class="plaque-desc" id="exDesc"></p>
+    <dl class="plaque-specs" id="exSpecs"></dl>
+    <div class="plaque-chips" id="exChips"></div>
+  </div>
+  <div class="plaque-hairline"></div>
+</aside>
+
+<!-- ══════════ 展品切换 ══════════ -->
+<aside class="switcher" id="switcher" aria-label="展品切换"></aside>
+
+<!-- ══════════ 底部控制 ══════════ -->
+<div class="dock">
+  <div class="dock-group">
+    <button class="ctl" id="btnRotate" type="button" aria-pressed="true">
+      <span class="ctl-dot"></span><span class="ctl-label">自动旋转</span>
+    </button>
+    <button class="ctl" id="btnReset" type="button">
+      <span class="ctl-label">重置视角</span>
+    </button>
+  </div>
+  <div class="dock-group" id="moodGroup" role="group" aria-label="光环境">
+    <span class="dock-caption">光环境</span>
+    <button class="ctl ctl-mood is-active" data-mood="stellar" type="button">星海</button>
+    <button class="ctl ctl-mood" data-mood="gold" type="button">鎏金</button>
+    <button class="ctl ctl-mood" data-mood="blue" type="button">幽蓝</button>
+  </div>
+</div>
+
+<p class="hint" id="hint">拖动旋转 · 滚轮缩放 · 右键平移</p>
+
+<footer class="credit">
+  <span id="creditModel"></span>
+  <span class="credit-sep">·</span>
+  <span>three.js r186 · WebGL 实时渲染</span>
+  <span class="credit-sep">·</span>
+  <span>键盘 1 / 2 / 3 切换展品</span>
+</footer>
+
+<!-- ══════════ 关于面板 ══════════ -->
+<section class="about" id="about" aria-hidden="true">
+  <button class="about-close" id="aboutClose" type="button" aria-label="关闭">×</button>
+  <p class="about-kicker">ABOUT THE PAVILION</p>
+  <h2 class="about-title">星海藏馆</h2>
+  <p class="about-text">
+    我们把三件数字藏品收进同一片夜空。它们来自开源社区，被实时渲染重新点亮——
+    金属的划痕、虹彩的折射、玉质的光散射，都在此刻发生。
+  </p>
+  <p class="about-text">
+    拖动画面，从任意角度凝视它们；切换光环境，看材质在不同星辉下呼吸。
+    这里没有终点，只有你愿意停留的那个角度。
+  </p>
+  <ul class="about-list">
+    <li><span>展品</span>3 件 · Khronos glTF Sample Assets</li>
+    <li><span>引擎</span>three.js · PBR · 泛光后处理</li>
+    <li><span>授权</span>CC BY 4.0 / CC BY-NC 4.0 / CC0 1.0</li>
+  </ul>
+</section>
+
+<!-- ══════════ 加载页 ══════════ -->
+<div class="loader" id="loader">
+  <div class="loader-mark">
+    <svg viewBox="0 0 40 40" aria-hidden="true">
+      <path d="M20 3 L23.6 15.2 L36 20 L23.6 24.8 L20 37 L16.4 24.8 L4 20 L16.4 15.2 Z"
+            fill="none" stroke="url(#bmGrad)" stroke-width="1" stroke-linejoin="round" class="lm-star"/>
+      <circle cx="20" cy="20" r="2" fill="url(#bmGrad)"/>
+    </svg>
+  </div>
+  <p class="loader-title">阶跃星辰</p>
+  <p class="loader-sub">星海藏馆 · STEPFUN DIGITAL PAVILION</p>
+  <div class="loader-bar"><i id="loaderBar"></i></div>
+  <p class="loader-status" id="loaderStatus">正在汇聚星光 …</p>
+</div>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>

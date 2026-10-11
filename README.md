@@ -10,6 +10,7 @@ Curated static front-end templates for StepFun Studio workspace gallery and agen
 | `aurora-launch` | Marketing | Apple-inspired launch page |
 | `prism-studio` | Tools | Google Material–inspired dashboard |
 | `atelier` | Sites | Editorial portfolio |
+| `stepfun-3d` | Creative | 3D digital pavilion |
 
 Paths: `sites/<id>/` with `index.html` entry.
 

@@ -1,0 +1,4 @@
+StepFun 3D pavilion demo (stepfun-3d export).
+
+Runtime: Three.js (MIT) under lib/.
+glTF sample assets as JSON under assets/models/ — Khronos / three.js sample licensing per upstream.

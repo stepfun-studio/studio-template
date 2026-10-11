@@ -8,5 +8,6 @@ Curated **StepFun Studio** front-end demos. No third-party template bundles exce
 | `aurora-launch` | Apple-inspired product launch page | StepFun Studio — use freely within StepFun products |
 | `prism-studio` | Google Material–inspired analytics dashboard (static) | StepFun Studio |
 | `atelier` | Editorial portfolio / studio site | StepFun Studio |
+| `stepfun-3d` | StepFun digital pavilion (3D gallery) | StepFun demo; Three.js MIT |
 
 Refresh curated demos manually; `scripts/import-vendors.sh` is deprecated for OSS bulk import.
