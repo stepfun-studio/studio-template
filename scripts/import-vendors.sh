@@ -55,6 +55,9 @@ clone_html5up launch-poster spectral
 clone_html5up product-page hyperspace
 clone_html5up campaign solid-state
 clone_git menu-board https://github.com/blackgirlbytes/blackgyalbites.git
+rm -f "$SITES/menu-board/css/images/food-fish.png" \
+  "$SITES/menu-board/css/images/menu-pdf-"*.pdf \
+  "$SITES/menu-board/css/images/screenshot.png" 2>/dev/null || true
 
 # Tools
 clone_git notes https://github.com/vscarpenter/scratchpad.git
