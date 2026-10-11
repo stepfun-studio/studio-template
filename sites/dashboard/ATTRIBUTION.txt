@@ -1,2 +1,0 @@
-UI kit: Tabler (https://tabler.io) — MIT License
-This page loads Tabler from jsDelivr CDN; see THIRD_PARTY_NOTICES.md in repo root.

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Prism Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,400;6..144,500;6..144,600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="rail-logo">Prism</div>
+      <nav class="rail-nav">
+        <a class="active" href="#">Overview</a>
+        <a href="#">Analytics</a>
+        <a href="#">Projects</a>
+        <a href="#">Settings</a>
+      </nav>
+      <div class="rail-user">
+        <span class="avatar">Y</span>
+        <div>
+          <strong>You</strong>
+          <span>Pro workspace</span>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div>
+          <h1>Good afternoon</h1>
+          <p>Your studio at a glance — static demo, no API.</p>
+        </div>
+        <div class="topbar-actions">
+          <button type="button" class="chip">Last 7 days</button>
+          <button type="button" class="fab">+ Create</button>
+        </div>
+      </header>
+
+      <section class="cards">
+        <article class="card metric">
+          <span class="label">Active sessions</span>
+          <strong class="value" data-count="1284">0</strong>
+          <span class="delta up">+12.4%</span>
+          <div class="spark" aria-hidden="true"></div>
+        </article>
+        <article class="card metric">
+          <span class="label">Completion rate</span>
+          <strong class="value" data-count="94">0</strong>
+          <span class="delta up">+3.1%</span>
+          <div class="ring" style="--p: 94" aria-hidden="true"></div>
+        </article>
+        <article class="card metric">
+          <span class="label">Latency p95</span>
+          <strong class="value"><span data-count="186">0</span> ms</strong>
+          <span class="delta down">−8 ms</span>
+        </article>
+      </section>
+
+      <section class="split">
+        <article class="card wide">
+          <div class="card-head">
+            <h2>Traffic</h2>
+            <span class="muted">Organic · Direct · Referral</span>
+          </div>
+          <div class="bars" aria-hidden="true">
+            <div style="--h: 72%"></div>
+            <div style="--h: 55%"></div>
+            <div style="--h: 88%"></div>
+            <div style="--h: 64%"></div>
+            <div style="--h: 91%"></div>
+            <div style="--h: 78%"></div>
+            <div style="--h: 83%"></div>
+          </div>
+        </article>
+        <article class="card">
+          <h2>Focus blocks</h2>
+          <ul class="timeline">
+            <li><span class="dot blue"></span>Design review · 10:00</li>
+            <li><span class="dot green"></span>Ship checklist · 14:30</li>
+            <li><span class="dot yellow"></span>User interviews · 16:00</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="card table-card">
+        <h2>Recent projects</h2>
+        <table>
+          <thead>
+            <tr><th>Name</th><th>Status</th><th>Owner</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Nova landing</td><td><span class="pill green">Live</span></td><td>Studio</td></tr>
+            <tr><td>Atlas mobile</td><td><span class="pill blue">In progress</span></td><td>Design</td></tr>
+            <tr><td>Orbit research</td><td><span class="pill gray">Draft</span></td><td>Research</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,21 +1,18 @@
 # studio-template
 
-Vendored static front-end templates for [StepFun Studio](https://github.com/stepfun-studio) workspace gallery and agent init flows.
+Curated static front-end templates for StepFun Studio workspace gallery and agent init flows.
 
-## Layout
+## Sites
 
-```
-sites/<template-id>/   # static site root (index.html or equivalent)
-```
+| ID | Scene | Notes |
+| --- | --- | --- |
+| `space-dash` | Games | Three.js NEON DASH (provided demo) |
+| `aurora-launch` | Marketing | Apple-inspired launch page |
+| `prism-studio` | Tools | Google Material–inspired dashboard |
+| `atelier` | Sites | Editorial portfolio |
 
-Studio catalog markers use `repo=https://github.com/stepfun-studio/studio-template`, `ref=v1` (or `main`), and `dir=sites/<template-id>`.
+Paths: `sites/<id>/` with `index.html` entry.
 
 ## License
 
-See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md). Do not remove upstream `LICENSE` / `ATTRIBUTION.txt` files when refreshing vendors.
-
-## Refresh vendors
-
-```bash
-./scripts/import-vendors.sh
-```
+See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).

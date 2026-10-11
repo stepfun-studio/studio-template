@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Aurora — Launch</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"></div>
+  <header class="nav">
+    <span class="mark">Aurora</span>
+    <nav class="nav-links">
+      <a href="#story">Story</a>
+      <a href="#craft">Craft</a>
+      <a href="#preorder">Preorder</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">Introducing Aurora One</p>
+      <h1>Quiet power.<br />Visible calm.</h1>
+      <p class="lede">A launch narrative built for products that speak softly and perform loudly — typography-first, motion-aware, zero clutter.</p>
+      <div class="hero-actions">
+        <a class="btn primary" href="#preorder">Reserve yours</a>
+        <a class="btn ghost" href="#film">Watch the film</a>
+      </div>
+      <div class="device" id="film">
+        <div class="device-screen">
+          <div class="screen-glow"></div>
+          <p class="device-caption">Ceramic white · Edge-to-edge display · All-day battery</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="stats" aria-label="Highlights">
+      <div><strong>2×</strong><span>Faster neural pipeline</span></div>
+      <div><strong>18h</strong><span>Mixed-use endurance</span></div>
+      <div><strong>48MP</strong><span>Computational capture</span></div>
+    </section>
+
+    <section class="story" id="story">
+      <div class="story-copy">
+        <h2>Designed as a whole.</h2>
+        <p>Hardware, interface, and sound share one material language — matte surfaces, precise radius, and light that feels photographed, not rendered.</p>
+      </div>
+      <div class="story-visual">
+        <div class="panel a"></div>
+        <div class="panel b"></div>
+        <div class="panel c"></div>
+      </div>
+    </section>
+
+    <section class="craft" id="craft">
+      <h2>Craft in three acts</h2>
+      <div class="grid">
+        <article>
+          <h3>Optics</h3>
+          <p>Lens stack tuned for natural bokeh and honest color in any light.</p>
+        </article>
+        <article>
+          <h3>Silence</h3>
+          <p>Acoustic architecture keeps fan noise below conversation level.</p>
+        </article>
+        <article>
+          <h3>Touch</h3>
+          <p>Haptic cues mirror UI rhythm — subtle, never theatrical.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="preorder" id="preorder">
+      <div class="preorder-inner">
+        <h2>Be first in line.</h2>
+        <p>Deposits are fully refundable until shipment. No backend here — this is a front-end launch canvas.</p>
+        <form class="preorder-form" onsubmit="return false">
+          <input type="email" placeholder="Email" aria-label="Email" />
+          <button type="submit" class="btn primary">Notify me</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>StepFun Studio template · Aurora Launch</span>
+    <span>© Demo</span>
+  </footer>
+  <script src="motion.js"></script>
+</body>
+</html>
