@@ -1,0 +1,4 @@
+NEON DASH / space-dash — StepFun Studio demo bundle (from local space-dash export).
+
+Runtime: Three.js (MIT) vendored under vendor/.
+3D models: three.js sample assets / Khronos glTF-Sample-Assets (MIT / CC0), as noted in index.html.

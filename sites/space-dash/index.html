@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>霓虹跑酷 · NEON DASH</title>
+<meta name="description" content="一个用 Three.js 和开源 3D 模型制作的 3D 跑酷小游戏：躲障碍、捡小黄鸭、别被狐狸追上。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0620'/%3E%3Cpath d='M6 22l5-12 5 7 4-9 6 14z' fill='%2300e5ff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./css/style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="game-canvas"></canvas>
+
+  <!-- ============ HUD ============ -->
+  <div id="hud" class="layer hidden" aria-hidden="true">
+    <div class="hud-top">
+      <div class="hud-box">
+        <span class="hud-label">分数</span>
+        <span class="hud-value" id="hud-score">0</span>
+      </div>
+      <div class="hud-box">
+        <span class="hud-label">距离</span>
+        <span class="hud-value" id="hud-dist">0 m</span>
+      </div>
+      <div class="hud-box">
+        <span class="hud-label">小黄鸭</span>
+        <span class="hud-value duck-color" id="hud-ducks">0</span>
+      </div>
+      <button id="btn-sound" class="icon-btn" title="音效开关" aria-label="音效开关">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h3L12 5.5v13L7 14.5H4z" fill="currentColor" stroke="none"/><g class="waves"><path d="M15.5 9.2a4 4 0 0 1 0 5.6"/><path d="M18.2 6.8a7.5 7.5 0 0 1 0 10.4"/></g></svg>
+      </button>
+      <button id="btn-pause" class="icon-btn" title="暂停 (P)" aria-label="暂停">
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6.5" y="5" width="3.6" height="14" rx="1.2"/><rect x="13.9" y="5" width="3.6" height="14" rx="1.2"/></svg>
+      </button>
+    </div>
+    <div class="hud-bottom">
+      <div class="danger-wrap">
+        <div class="danger-label">狐狸距离</div>
+        <div class="danger-bar"><div class="danger-fill" id="danger-fill"></div></div>
+      </div>
+    </div>
+    <div id="float-pop" class="float-pop"></div>
+  </div>
+
+  <!-- ============ 触屏按钮 ============ -->
+  <div id="run-hint" class="run-hint"></div>
+
+  <div id="touch-pad" class="layer hidden">
+    <button class="tbtn" data-act="left">◀</button>
+    <button class="tbtn" data-act="jump">跳</button>
+    <button class="tbtn" data-act="slide">滑</button>
+    <button class="tbtn" data-act="right">▶</button>
+  </div>
+
+  <!-- ============ 加载 ============ -->
+  <div id="screen-loading" class="layer screen">
+    <div class="panel">
+      <h1 class="logo">NEON<span>DASH</span></h1>
+      <p class="sub">霓虹跑酷 · 3D</p>
+      <div class="progress"><div class="progress-fill" id="load-fill"></div></div>
+      <p class="tip" id="load-tip">正在装载 3D 模型…</p>
+    </div>
+  </div>
+
+  <!-- ============ 标题（首屏：角色是主角，说明退到角落） ============ -->
+  <div id="screen-title" class="layer screen title-screen hidden">
+    <header class="title-top">
+      <h1 class="logo">NEON<span>DASH</span></h1>
+      <p class="sub">霓虹跑酷 · 3D</p>
+      <p class="tagline">躲障碍 · 抢小黄鸭 · 别被狐狸追上</p>
+    </header>
+
+    <button id="btn-help" class="help-btn" type="button" title="操作说明" aria-label="操作说明">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.3 9.1a2.8 2.8 0 1 1 4.2 2.4c-.9.5-1.5 1.1-1.5 2.1"/><circle cx="12" cy="17.3" r="1" fill="currentColor" stroke="none"/></svg>
+    </button>
+
+    <div id="help-card" class="help-card hidden">
+      <div class="help-head">操作说明<button id="btn-help-close" type="button" aria-label="收起">×</button></div>
+      <p class="hint">
+        <b>← →</b> / <b>A D</b> 变道 &nbsp;·&nbsp; <b>↑</b> / <b>空格</b> 跳跃（空中再按一次＝二段跳）<br>
+        <b>↓</b> / <b>S</b> 滑铲 &nbsp;·&nbsp; <b>P</b> 暂停<br>
+        手机：左右滑动变道，上滑跳跃（再滑一次二段跳），下滑滑铲
+      </p>
+    </div>
+
+    <footer class="title-bottom">
+      <div class="char-select">
+        <div class="char-label">选择角色</div>
+        <div class="char-row">
+          <button class="char-card active" data-char="robot">
+            <span class="char-emoji">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="3.9" r="1.1"/>
+                <path d="M12 5.1V7"/>
+                <rect x="5" y="7" width="14" height="11" rx="3.6"/>
+                <circle cx="9.6" cy="12.4" r="1.35" fill="currentColor" stroke="none"/>
+                <circle cx="14.4" cy="12.4" r="1.35" fill="currentColor" stroke="none"/>
+                <path d="M9.6 15.6h4.8"/>
+                <path d="M9 18v2.6M15 18v2.6"/>
+              </svg>
+            </span>
+            <span class="char-name">机器人</span>
+            <span class="char-tag">灵活</span>
+          </button>
+          <button class="char-card" data-char="soldier">
+            <span class="char-emoji">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 13.4a7 7 0 0 1 14 0V17H5z"/>
+                <path d="M4.2 17h15.6"/>
+                <rect x="8.4" y="12.2" width="7.2" height="2.8" rx="1.4" fill="currentColor" stroke="none"/>
+                <path d="M12 6.4V4.6"/>
+              </svg>
+            </span>
+            <span class="char-name">星际士兵</span>
+            <span class="char-tag">就绪</span>
+          </button>
+        </div>
+      </div>
+
+      <button id="btn-start" class="big-btn">开始游戏</button>
+      <p class="best">最高分：<span id="best-score">0</span></p>
+      <p class="credits">3D 模型来源：three.js 示例资产 / Khronos glTF-Sample-Assets（MIT / CC0）</p>
+    </footer>
+  </div>
+
+  <!-- ============ 暂停 ============ -->
+  <div id="screen-pause" class="layer screen hidden">
+    <div class="panel">
+      <h2>已暂停</h2>
+      <button id="btn-resume" class="big-btn">继续</button>
+      <button id="btn-quit" class="ghost-btn">返回标题</button>
+    </div>
+  </div>
+
+  <!-- ============ 结束 ============ -->
+  <div id="screen-over" class="layer screen hidden">
+    <div class="panel">
+      <h2 id="over-title">被狐狸追上了！</h2>
+      <p class="sub" id="over-reason">下次早点变道～</p>
+      <div class="score-grid">
+        <div><span class="hud-label">本局分数</span><b id="over-score">0</b></div>
+        <div><span class="hud-label">距离</span><b id="over-dist">0 m</b></div>
+        <div><span class="hud-label">小黄鸭</span><b id="over-ducks">0</b></div>
+        <div><span class="hud-label">最高分</span><b id="over-best">0</b></div>
+      </div>
+      <button id="btn-again" class="big-btn">再来一局</button>
+      <button id="btn-home" class="ghost-btn">返回标题</button>
+    </div>
+  </div>
+
+  <div id="fatal" class="layer screen hidden">
+    <div class="panel">
+      <h2>无法启动 3D 渲染</h2>
+      <p class="sub">你的浏览器或设备不支持 WebGL，请换用较新的 Chrome / Edge / Safari 再试。</p>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>

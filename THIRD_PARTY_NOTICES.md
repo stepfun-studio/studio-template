@@ -8,6 +8,7 @@ Each subdirectory under `sites/` is vendored from an open-source project. Licens
 | `night-arcade` | [MStewGT/cyber-runner](https://github.com/MStewGT/cyber-runner) | MIT |
 | `block-room` | [trzaskos/vanilla-js-tetris](https://github.com/trzaskos/vanilla-js-tetris) | MIT |
 | `orbit` | [Squishy123/asteroids](https://github.com/Squishy123/asteroids) | MIT |
+| `space-dash` | StepFun demo bundle (Three.js + Khronos glTF sample assets; see `sites/space-dash/index.html` credits) | Internal demo |
 | `launch-poster` | HTML5 UP [Spectral](https://html5up.net/spectral) | CC BY 3.0 |
 | `product-page` | HTML5 UP [Hyperspace](https://html5up.net/hyperspace) | CC BY 3.0 |
 | `campaign` | HTML5 UP [Solid State](https://html5up.net/solid-state) | CC BY 3.0 |
