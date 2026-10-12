@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>天际突袭 · SKY STRIKE 3D</title>
+<link rel="stylesheet" href="./css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>✈</text></svg>">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./js/vendor/three.module.js",
+    "three/addons/": "./js/vendor/addons/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="scene"></canvas>
+
+  <!-- ======= HUD ======= -->
+  <div id="hud" class="hidden">
+    <!-- 顶部左：分数 -->
+    <div class="hud-corner tl">
+      <div class="panel score-panel">
+        <div class="label">SCORE 得分</div>
+        <div class="value" id="score">0</div>
+        <div class="sub"><span id="best">BEST 0</span></div>
+      </div>
+      <div class="panel combo-panel" id="comboPanel">
+        <div class="label">COMBO</div>
+        <div class="value combo" id="combo">x1.0</div>
+      </div>
+    </div>
+
+    <!-- 顶部中：波次 / 字幕 -->
+    <div class="hud-top">
+      <div id="announce" class="announce"></div>
+      <div id="subtitle" class="subtitle"></div>
+      <div id="bossBar" class="boss-bar hidden">
+        <div class="boss-name">⚠ 大型敌机 <span id="bossHpNum">0</span></div>
+        <div class="bar boss"><i id="bossFill" class="fill"></i></div>
+      </div>
+    </div>
+
+    <!-- 顶部右：按钮 -->
+    <div class="hud-corner tr">
+      <div class="panel wave-panel">
+        <div class="label">WAVE 波次</div>
+        <div class="value" id="wave">1</div>
+      </div>
+      <div class="btn-row">
+        <button class="icon-btn" id="btnSound" title="语音 / 音效">🔊</button>
+        <button class="icon-btn" id="btnPause" title="暂停 (Esc)">⏸</button>
+      </div>
+    </div>
+
+    <!-- 准星 -->
+    <div id="crosshair">
+      <svg viewBox="0 0 200 200" width="200" height="200">
+        <circle class="ch-ring" cx="100" cy="100" r="46"/>
+        <path class="ch-tick" d="M100 44 L100 58"/>
+        <path class="ch-tick" d="M100 142 L100 156"/>
+        <path class="ch-tick" d="M44 100 L58 100"/>
+        <path class="ch-tick" d="M142 100 L156 100"/>
+        <circle class="ch-dot" cx="100" cy="100" r="2.5"/>
+      </svg>
+    </div>
+
+    <!-- 锁定框（跟随敌机屏幕投影） -->
+    <div id="lockBox" class="lock-box">
+      <svg viewBox="0 0 100 100" width="100" height="100">
+        <path d="M30 8 L8 8 L8 30"/>
+        <path d="M70 8 L92 8 L92 30"/>
+        <path d="M92 70 L92 92 L70 92"/>
+        <path d="M30 92 L8 92 L8 70"/>
+      </svg>
+      <div class="lock-text">LOCK</div>
+    </div>
+
+    <!-- 底部左：状态 -->
+    <div class="hud-corner bl">
+      <div class="panel status-panel">
+        <div class="bar-row">
+          <span class="bar-label">HULL</span>
+          <div class="bar"><i id="hpBar" class="fill hp"></i></div>
+          <span class="bar-num" id="hpNum">100</span>
+        </div>
+        <div class="bar-row">
+          <span class="bar-label">BOOST</span>
+          <div class="bar"><i id="boostBar" class="fill boost"></i></div>
+          <span class="bar-num" id="boostNum">100</span>
+        </div>
+        <div class="weapon-row">
+          <div class="missile-count"><span class="msl-ico">➤</span><span id="missileNum">6</span><span class="msl-unit">MSL</span></div>
+          <div class="tag" id="weaponTag">GUN</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 底部中：速度 / 高度 -->
+    <div class="hud-bottom">
+      <div class="panel speed-panel">
+        <div class="spd"><span id="speedNum">0</span><small>KM/H</small></div>
+        <div class="bar thin"><i id="throttleBar" class="fill thr"></i></div>
+        <div class="alt"><span class="alt-label">ALT</span><span id="altNum">0</span><small>M</small></div>
+      </div>
+    </div>
+
+    <!-- 底部右：雷达 -->
+    <div class="hud-corner br">
+      <div class="panel radar-panel">
+        <canvas id="radar" width="300" height="300"></canvas>
+        <div class="radar-label">TACTICAL RADAR</div>
+      </div>
+    </div>
+
+    <!-- 警告 -->
+    <div id="warnBox" class="warn hidden">
+      <div class="warn-icon">⚠</div>
+      <div class="warn-text" id="warnText">导弹来袭</div>
+    </div>
+
+    <div id="dmgFlash" class="dmg-flash"></div>
+    <div id="vignette" class="vignette"></div>
+    <div id="scanlines" class="scanlines"></div>
+  </div>
+
+  <!-- ======= 加载 ======= -->
+  <div id="loading" class="screen">
+    <div class="logo">SKY<span>STRIKE</span>3D</div>
+    <div class="loading-bar"><i id="loadBar"></i></div>
+    <div class="loading-tip" id="loadTip">正在装配战机…</div>
+  </div>
+
+  <!-- ======= 开始菜单 ======= -->
+  <div id="menu" class="screen hidden">
+    <div class="menu-inner">
+      <div class="logo">SKY<span>STRIKE</span>3D</div>
+      <div class="slogan">天 际 突 袭 · 开 源 模 型 3D 空 战</div>
+      <div class="ctrl-grid">
+        <div class="ctrl"><b>鼠标 / WASD</b><span>操控战机</span></div>
+        <div class="ctrl"><b>左键 / 空格</b><span>机炮射击</span></div>
+        <div class="ctrl"><b>右键 / F</b><span>发射导弹</span></div>
+        <div class="ctrl"><b>Shift</b><span>加力冲刺</span></div>
+        <div class="ctrl"><b>Esc / P</b><span>暂停</span></div>
+        <div class="ctrl"><b>准星对准敌机</b><span>自动锁定</span></div>
+      </div>
+      <button class="big-btn" id="btnStart">开 始 任 务</button>
+      <div class="credit">战机模型：F-16 Block 70 / Aero L-159A ALCA（Sketchfab · CC BY 4.0）· 语音包：StepFun TTS 合成</div>
+    </div>
+  </div>
+
+  <!-- ======= 暂停 ======= -->
+  <div id="pause" class="screen hidden">
+    <div class="menu-inner small">
+      <div class="logo small">PAUSED</div>
+      <div class="slogan">任务暂停</div>
+      <button class="big-btn" id="btnResume">继 续 战 斗</button>
+      <button class="text-btn" id="btnQuit">放弃任务</button>
+    </div>
+  </div>
+
+  <!-- ======= 结算 ======= -->
+  <div id="gameover" class="screen hidden">
+    <div class="menu-inner small">
+      <div class="go-title">MISSION FAILED</div>
+      <div class="stat-grid">
+        <div class="stat"><span>最终得分</span><b id="goScore">0</b></div>
+        <div class="stat"><span>抵达波次</span><b id="goWave">1</b></div>
+        <div class="stat"><span>击落敌机</span><b id="goKills">0</b></div>
+        <div class="stat"><span>最高连击</span><b id="goCombo">x1.0</b></div>
+      </div>
+      <div class="go-best" id="goBest"></div>
+      <button class="big-btn" id="btnRetry">再 次 出 击</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>

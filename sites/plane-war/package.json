@@ -1,0 +1,20 @@
+{
+  "name": "sky-strike-3d",
+  "private": true,
+  "version": "1.0.0",
+  "description": "天际突袭 · SKY STRIKE 3D —— 浏览器 3D 空战游戏（开源战机模型 + StepFun TTS 语音）",
+  "type": "commonjs",
+  "scripts": {
+    "serve": "node tools/serve.js 8099",
+    "pack-models": "node tools/pack-models.js",
+    "pack-models:check": "node tools/pack-models.js --check",
+    "verify": "node tools/tests/verify-model.js",
+    "test": "node tools/run-test.js"
+  },
+  "devDependencies": {
+    "ws": "^8.22.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,33 @@
+SKYSTRIKE 3D — 天际突袭
+========================================
+
+一个基于 three.js 的 3D 空战射击小游戏：开源战机模型 + StepFun TTS 语音包。
+
+技术栈
+----------------------------------------
+- three.js r169（本地化，js/vendor/three.module.js）
+- 原生 ES Modules + importmap，无构建步骤
+- WebAudio 实时合成音效（机炮 / 爆炸 / 锁定 / 警报 / 引擎轰鸣）
+- StepFun TTS（step-tts-2）合成的 12 条中文语音包（audio/vo_*.mp3）
+
+操作
+----------------------------------------
+鼠标 / WASD  操控战机（俯仰、滚转）
+左键 / 空格  机炮射击
+右键 / F     发射导弹（需先锁定目标）
+Shift        加力冲刺
+Esc / P      暂停
+M            静音
+
+第三方资源与许可
+----------------------------------------
+战机模型（Sketchfab，CC BY 4.0）：
+- F-16 Block 70 — 作者 CreadorDeMu
+  https://sketchfab.com/3d-models/...
+- Aero L-159A ALCA — 作者 Yo Boy
+  均依据 Creative Commons Attribution 4.0 International (CC BY 4.0) 使用。
+
+语音包：StepFun TTS 合成（Step-tts-2）。
+three.js：MIT License，© 2010-2024 three.js authors。
+
+本作品中的代码部分可自由使用；使用上述模型时请保留其 CC BY 4.0 署名。
