@@ -1,0 +1,6 @@
+{
+  "appId": "com.stepfun.pocketplanet",
+  "appName": "Pocket Planet",
+  "webDir": "dist",
+  "android": { "backgroundColor": "#102820" }
+}

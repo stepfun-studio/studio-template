@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#102820"><meta name="description" content="A tiny, offline planet to explore. Collect field notes, guide a rover, and discover the world around you.">
+  <title>Pocket Planet · Explorer</title>
+</head>
+<body>
+  <div id="app">
+    <header class="masthead"><a href="#" class="brand" aria-label="Pocket Planet home"><span class="brand-orbit" aria-hidden="true">✳</span> pocket planet</a><span class="edition">FIELD KIT / 001</span></header>
+    <main>
+      <div class="heading"><div><p class="eyebrow">A LITTLE WORLD. A BIG ADVENTURE.</p><h1>Stay curious.<br>Go explore.</h1></div><div class="stamp" aria-hidden="true">OFFLINE<br><b>EXPLORER</b><br>CLUB ✦</div></div>
+      <div class="stats" aria-label="Expedition progress"><span><b id="stars">0</b> stardust</span><span><b id="discovered">0 / 6</b> discoveries</span><span class="mode-tag" id="world-mode">SIMULATED PLANET</span></div>
+      <section class="world-card" aria-labelledby="world-title">
+        <div class="world-top"><div><p class="eyebrow">YOUR POCKET-SIZED WILDERNESS</p><h2 id="world-title">Mosslight meadow</h2></div><span class="weather">✦ 18° / calm</span></div>
+        <div class="planet" id="planet" role="img" aria-label="Illustrated meadow with a movable rover and six collectible stars">
+          <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><span class="moon">☾</span>
+          <div class="terrain"><div class="river"></div><div class="hill hill-one"></div><div class="hill hill-two"></div><div class="path"></div><span class="tree tree-one">♠</span><span class="tree tree-two">♠</span><span class="tree tree-three">♠</span><span class="rock rock-one"></span><span class="rock rock-two"></span><span class="flowers">✦ · ✦</span><div id="beacons"></div><div id="rover" class="rover"><span>✺</span></div></div>
+          <div class="planet-caption">N <span>↑</span><br>35° · POCKET SECTOR</div>
+        </div>
+        <p id="rover-status" class="rover-status" role="status">Move your rover to the glowing stars.</p>
+        <div class="controls"><button id="tilt" class="pill">↗ Enable tilt</button><div class="dpad" aria-label="Rover controls"><button data-move="up" aria-label="Move north">↑</button><button data-move="left" aria-label="Move west">←</button><button data-move="down" aria-label="Move south">↓</button><button data-move="right" aria-label="Move east">→</button></div></div>
+        <p class="small-hint">Arrow keys or buttons always work. Tilt is optional. <button id="reset-world" class="text-button">New expedition</button></p>
+      </section>
+      <section class="field-tools" aria-labelledby="tools-title"><div class="section-heading"><h2 id="tools-title">Your field kit</h2><span>MAKE A LITTLE DISCOVERY</span></div>
+        <div class="tool-grid"><article class="tool camera-tool"><span class="tool-icon" aria-hidden="true">▣</span><p class="eyebrow">01 / COLLECT</p><h3>Keep a curious thing.</h3><p>A leaf, a cloud, a tiny wonder. Turn a photo into a field note.</p><button id="camera">Take a photo <span>↗</span></button><button id="sample" class="secondary">Add illustrated sample</button><p id="camera-status" class="capability-status">Camera opens only when requested.</p></article>
+        <article class="tool location-tool"><span class="tool-icon" aria-hidden="true">◎</span><p class="eyebrow">02 / WANDER</p><h3>Find your next sector.</h3><p>Reveal a coordinate-inspired habitat. No tracking, no background GPS.</p><button id="locate">Explore near me <span>↗</span></button><button id="demo-location" class="secondary">Explore simulated sector</button><p id="location-status" class="capability-status">Location stays on this device.</p></article></div>
+      </section>
+      <section class="journal" aria-labelledby="journal-title"><div class="section-heading"><h2 id="journal-title">The discovery journal</h2><span id="note-count">0 FIELD NOTES</span></div><p class="journal-intro">Small things worth remembering. Saved here, just for you.</p><div id="notes" class="notes"></div></section>
+      <section class="settings" aria-label="Device and privacy settings"><label class="haptic-toggle"><input id="haptics" type="checkbox"> Haptic feedback</label><p id="haptic-status" class="capability-status">Off. Device support varies; silent on unsupported hardware.</p><details><summary>About this expedition</summary><p>This is an original offline mini-game, not navigation. The planet and stars are fictional. GPS only selects a habitat; it never claims nearby real discoveries. Photo notes and approximate sectors stay locally on this device. Don't play while walking or driving.</p><button id="clear-data" class="text-button">Erase local journal and progress</button></details></section>
+      <footer>MADE FOR THE WONDERS BETWEEN PLACES <span>✳</span> POCKET PLANET</footer>
+    </main>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <dialog id="note-dialog"><form method="dialog"><p class="eyebrow">A NEW FIELD NOTE</p><h2>Name your discovery</h2><img id="note-preview" alt="Preview of your field note"><label for="note-name">Discovery name</label><input id="note-name" maxlength="48" required placeholder="A tiny wonder"><p id="note-kind" class="capability-status"></p><div class="dialog-actions"><button value="cancel" formnovalidate>Cancel</button><button id="save-note" value="save">Save discovery</button></div></form></dialog>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "pocket-planet", "version": "1.0.0", "private": true, "type": "module",
+  "packageManager": "pnpm@11.15.1",
+  "engines": { "node": ">=22.13.0 <23" },
+  "scripts": {
+    "dev": "vite --host 0.0.0.0", "build": "vite build", "preview": "vite preview --host 0.0.0.0",
+    "test": "node --test tests/*.test.js", "lint": "eslint src tests scripts/*.mjs",
+    "typecheck": "tsc --noEmit", "android:init": "node scripts/init-android.mjs",
+    "android:bootstrap": "bash scripts/bootstrap-android.sh", "android:apk": "bash scripts/build-apk.sh"
+  },
+  "dependencies": {
+    "@capacitor/android": "7.6.9", "@capacitor/app": "7.1.2", "@capacitor/core": "7.6.9",
+    "@capacitor/camera": "7.0.5", "@capacitor/geolocation": "7.1.8", "@capacitor/haptics": "7.0.5", "@capacitor/motion": "7.0.3"
+  },
+  "devDependencies": { "@capacitor/cli": "7.6.9", "@eslint/js": "9.39.1", "eslint": "9.39.1", "globals": "16.5.0", "typescript": "5.9.3", "vite": "6.4.1" }
+}
